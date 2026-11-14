@@ -1,0 +1,6 @@
+{
+  "name": "StarBase Junior",
+  "description": "Interactive 3D lunar and Martian outpost simulator for ages 7-12 grounded in real NASA space weather, dosimetry, and biology data.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
