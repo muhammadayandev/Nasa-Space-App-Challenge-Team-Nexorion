@@ -23,6 +23,10 @@ class SoundEngine {
   private clipBufferCache = new Map<string, AudioBuffer>();
   private missingClips = new Set<string>();
   private activeVoiceNode: AudioBufferSourceNode | null = null;
+  private stormLoopSrc: AudioBufferSourceNode | null = null;
+  private stormLoopGain: GainNode | null = null;
+  private stormLoopWanted = false;
+  private lastAlertSfxTime = 0;
 
   // Ambient Retro Space Synthesizer State
   private bgmRunning = false;
@@ -266,6 +270,7 @@ class SoundEngine {
     this.muted = nextMuted;
     if (nextMuted) {
       this.stopRocketRumble();
+      this.stopDustStormLoop();
       if (this.bgmMasterGain && this.ctx) {
         this.bgmMasterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.06);
       }
@@ -313,6 +318,118 @@ class SoundEngine {
       window.speechSynthesis.speak(utter);
     } catch {
       // Ignore speech synthesis errors on restricted browsers
+    }
+  }
+
+  private async fetchDecodedClip(url: string): Promise<AudioBuffer | null> {
+    const ctx = this.ensureContext();
+    if (!ctx || this.missingClips.has(url)) return null;
+    const cached = this.clipBufferCache.get(url);
+    if (cached) return cached;
+    try {
+      const res = await fetch(url);
+      const ctype = res.headers.get('content-type') || '';
+      if (!res.ok || ctype.includes('text/html')) {
+        this.missingClips.add(url);
+        return null;
+      }
+      const arr = await res.arrayBuffer();
+      if (arr.byteLength < 128) {
+        this.missingClips.add(url);
+        return null;
+      }
+      const buffer = await ctx.decodeAudioData(arr);
+      this.clipBufferCache.set(url, buffer);
+      return buffer;
+    } catch {
+      this.missingClips.add(url);
+      return null;
+    }
+  }
+
+  public async playRedAlertSfx(): Promise<void> {
+    if (this.muted) return;
+    const nowMs = Date.now();
+    if (nowMs - this.lastAlertSfxTime < 1800) return;
+    this.lastAlertSfxTime = nowMs;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const buf = await this.fetchDecodedClip('/audio/sfx/sfx_red_alert.mp3');
+    if (!buf || this.muted) return;
+    try {
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.32, ctx.currentTime);
+      gain.connect(ctx.destination);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(gain);
+      src.onended = () => {
+        try {
+          gain.disconnect();
+        } catch {
+          // ignore
+        }
+      };
+      src.start();
+    } catch {
+      // Ignore Web Audio errors
+    }
+  }
+
+  public async startDustStormLoop(sheltered: boolean): Promise<void> {
+    this.stormLoopWanted = true;
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    if (this.stormLoopSrc) {
+      this.setDustStormSheltered(sheltered);
+      return;
+    }
+    const buf = await this.fetchDecodedClip('/audio/sfx/sfx_dust_storm.mp3');
+    if (!buf || !this.stormLoopWanted || this.muted || this.stormLoopSrc) return;
+    try {
+      const gain = ctx.createGain();
+      const target = sheltered ? 0.1 : 0.32;
+      gain.gain.setValueAtTime(0.001, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(target, ctx.currentTime + 0.8);
+      gain.connect(ctx.destination);
+
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      src.connect(gain);
+      src.start();
+      this.stormLoopSrc = src;
+      this.stormLoopGain = gain;
+    } catch {
+      // Ignore Web Audio errors
+    }
+  }
+
+  public setDustStormSheltered(sheltered: boolean): void {
+    if (!this.ctx || !this.stormLoopGain) return;
+    const target = sheltered ? 0.1 : 0.32;
+    this.stormLoopGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.25);
+  }
+
+  public stopDustStormLoop(): void {
+    this.stormLoopWanted = false;
+    if (this.stormLoopSrc) {
+      try {
+        this.stormLoopSrc.stop();
+        this.stormLoopSrc.disconnect();
+      } catch {
+        // already stopped
+      }
+      this.stormLoopSrc = null;
+    }
+    if (this.stormLoopGain) {
+      try {
+        this.stormLoopGain.disconnect();
+      } catch {
+        // ignore
+      }
+      this.stormLoopGain = null;
     }
   }
 

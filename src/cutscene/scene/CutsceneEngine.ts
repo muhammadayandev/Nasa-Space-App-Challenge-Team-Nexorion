@@ -1048,10 +1048,10 @@ export class CutsceneEngine {
       this.earthRocket.group.position.set(0, 1.45, 0);
       this.earthRocket.flames.forEach((f) => (f.visible = false));
 
-      if (lt < 3.8) {
+      if (lt < 7.0) {
         // Walking across elevated crew access arm into spacecraft hatch
         this.cockpitGroup.visible = false;
-        const p = lt / 3.8;
+        const p = lt / 7.0;
         const armX = THREE.MathUtils.lerp(-5.2, -1.6, p);
         const bob = Math.abs(Math.sin(lt * 5.4)) * 0.04;
         this.camera.position.set(armX, 11.4 + bob, 1.4);
@@ -1061,7 +1061,7 @@ export class CutsceneEngine {
       } else {
         // Inside spacecraft cockpit seated looking out forward canopy
         this.cockpitGroup.visible = true;
-        const p = (lt - 3.8) / 3.7;
+        const p = Math.min(1, (lt - 7.0) / 7.2);
         this.camera.position.set(0, 13.55 - p * 0.08, 0.9);
         this.camera.fov = 66;
         this.camera.updateProjectionMatrix();
@@ -1076,8 +1076,8 @@ export class CutsceneEngine {
       const { count, ignited } = getLaunchCountdownValue(lt);
       this.sound.updateCutsceneAudio(id, lt, count, ignited, subKey, subTone, subSpeaker, subText);
 
-      // Retract crew access arm at T-3s
-      const armRetract = THREE.MathUtils.clamp((lt - 4.2) / 2.2, 0, 1);
+      // Retract crew access arm cleanly prior to ignition
+      const armRetract = THREE.MathUtils.clamp((lt - (LAUNCH_IGNITION_TIME - 3.2)) / 2.5, 0, 1);
       this.earthComplex.accessArm.rotation.y = armRetract * 1.15;
 
       if (!ignited) {
@@ -1190,25 +1190,25 @@ export class CutsceneEngine {
         poseAstronautSeatedTask(this.transitCrew[1], lt, 'navigator');
       }
 
-      // Stage 1 (lt 0..3.6s): Close cinematic view through circular spacecraft porthole at working crew
-      // Stage 2 (lt 3.6..6.2s): Continuous zoom-out revealing full cruiser -> tiny speck between massive Earth & distant Mars
-      // Stage 3 (lt 6.2..12.0s): 8-month timeline crossing vast deep space until colossal Mars fills view
-      if (lt < 3.6) {
+      // Stage 1 (lt 0..5.5s): Close cinematic view through circular spacecraft porthole during Transit Log 1
+      // Stage 2 (lt 5.5..8.5s): Continuous zoom-out revealing full cruiser -> tiny speck between massive Earth & distant Mars
+      // Stage 3 (lt 8.5..14.5s): 8-month timeline crossing vast deep space until colossal Mars fills view
+      if (lt < 5.5) {
         this.transitCruiser.visible = true;
         this.transitCruiser.position.copy(p0);
         this.transitCruiser.scale.setScalar(1);
         this.transitSpeck.visible = false;
         this.transitArcLine.visible = false;
 
-        const panP = THREE.MathUtils.smoothstep(lt, 0, 3.6);
+        const panP = THREE.MathUtils.smoothstep(lt, 0, 5.5);
         const camX = THREE.MathUtils.lerp(p0.x - 0.55, p0.x + 0.55, panP);
         const camZ = THREE.MathUtils.lerp(p0.z + 5.6, p0.z + 7.2, panP);
         this.camera.fov = 50;
         this.camera.updateProjectionMatrix();
         this.camera.position.set(camX, p0.y + 0.12, camZ);
         this.camera.lookAt(p0.x, p0.y - 0.02, p0.z + 0.45);
-      } else if (lt < 6.2) {
-        const zoomP = THREE.MathUtils.smoothstep(lt, 3.6, 6.2);
+      } else if (lt < 8.5) {
+        const zoomP = THREE.MathUtils.smoothstep(lt, 5.5, 8.5);
         // Smoothly shrink the actual cruiser into a speck before handing off to bright beacon speck
         this.transitCruiser.visible = zoomP < 0.65;
         this.transitCruiser.position.copy(_v1);

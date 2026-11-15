@@ -1,4 +1,4 @@
-import { CUTSCENE_CHAPTERS, type ChapterId } from '../timeline';
+import { COUNTDOWN_START_TIME, CUTSCENE_CHAPTERS, LAUNCH_IGNITION_TIME, type ChapterId } from '../timeline';
 import { VOICE_CLIP_BY_CUTSCENE_KEY } from '../../data/voiceManifest';
 
 type AllowedVoice = 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
@@ -59,11 +59,23 @@ export class SoundEngine {
   private activeVoiceSrc: AudioBufferSourceNode | null = null;
   private activeVoiceToken = 0;
 
+  // Integrated studio BGM & SFX channels
+  private bgmGain: GainNode | null = null;
+  private bgmSrc: AudioBufferSourceNode | null = null;
+  private bgmStarting = false;
+  private stormSfxGain: GainNode | null = null;
+  private stormSfxSrc: AudioBufferSourceNode | null = null;
+  private stormSfxStarting = false;
+  private activeSfxNodes = new Set<AudioBufferSourceNode>();
+  private usingCountdownFullClip = false;
+  private loopsSilenced = false;
+
   private rawWavCache = new Map<string, ArrayBuffer>();
   private voiceBufferCache = new Map<string, AudioBuffer>();
   private voiceInFlight = new Map<string, Promise<ArrayBuffer | null>>();
   private missingStaticClips = new Set<string>();
   private prefetchStarted = false;
+  private staticPreloadStarted = false;
   private ttsUnavailable = true;
 
   private muted = false;
@@ -281,9 +293,132 @@ export class SoundEngine {
       if (ctx.state === 'suspended') {
         void ctx.resume();
       }
+      this.preloadStaticCutsceneAudio();
     } catch {
       // Ignore Web Audio failures in restricted environments
     }
+  }
+
+  private preloadStaticCutsceneAudio(): void {
+    if (this.staticPreloadStarted || !this.ctx) return;
+    this.staticPreloadStarted = true;
+    const files = [
+      '/audio/bgm/bgm_space_cinematic.mp3',
+      '/audio/sfx/sfx_rocket_liftoff.mp3',
+      '/audio/sfx/sfx_red_alert.mp3',
+      '/audio/sfx/sfx_dust_storm.mp3',
+      '/audio/voiceovers/earth_farewell_1.mp3',
+      '/audio/voiceovers/earth_farewell_2.mp3',
+      '/audio/voiceovers/boarding_1.mp3',
+      '/audio/voiceovers/boarding_2.mp3',
+      '/audio/voiceovers/launch_1.mp3',
+      '/audio/voiceovers/countdown_full.mp3',
+      '/audio/voiceovers/launch_2.mp3',
+      '/audio/voiceovers/launch_3.mp3',
+      '/audio/voiceovers/transit_1.mp3',
+    ];
+    for (const file of files) {
+      void this.tryFetchStaticClip(file);
+    }
+  }
+
+  private async ensureCutsceneBgm(): Promise<void> {
+    if (
+      this.loopsSilenced ||
+      this.bgmSrc ||
+      this.bgmStarting ||
+      !this.ctx ||
+      !this.masterGain ||
+      this.muted
+    ) {
+      return;
+    }
+    this.bgmStarting = true;
+    try {
+      const buf = await this.tryFetchStaticClip('/audio/bgm/bgm_space_cinematic.mp3');
+      if (this.loopsSilenced || !buf || !this.ctx || !this.masterGain || this.bgmSrc || this.muted) {
+        return;
+      }
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.24, this.ctx.currentTime + 1.2);
+      gain.connect(this.masterGain);
+
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      src.connect(gain);
+      src.start();
+      this.bgmGain = gain;
+      this.bgmSrc = src;
+    } finally {
+      this.bgmStarting = false;
+    }
+  }
+
+  private async ensureStormSfxLoop(): Promise<void> {
+    if (
+      this.loopsSilenced ||
+      this.stormSfxSrc ||
+      this.stormSfxStarting ||
+      !this.ctx ||
+      !this.masterGain ||
+      this.muted
+    ) {
+      return;
+    }
+    this.stormSfxStarting = true;
+    try {
+      const buf = await this.tryFetchStaticClip('/audio/sfx/sfx_dust_storm.mp3');
+      if (
+        this.loopsSilenced ||
+        !buf ||
+        !this.ctx ||
+        !this.masterGain ||
+        this.stormSfxSrc ||
+        this.muted
+      ) {
+        return;
+      }
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+      gain.connect(this.masterGain);
+
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      src.connect(gain);
+      src.start();
+      this.stormSfxGain = gain;
+      this.stormSfxSrc = src;
+    } finally {
+      this.stormSfxStarting = false;
+    }
+  }
+
+  private async playOneShotSfx(filePath: string, gainLevel = 0.45): Promise<boolean> {
+    if (!this.ensurePlayable() || !this.ctx || !this.masterGain) return false;
+    const buf = await this.tryFetchStaticClip(filePath);
+    if (!buf || !this.ensurePlayable() || !this.ctx || !this.masterGain) return false;
+    const now = this.ctx.currentTime;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(gainLevel, now);
+    gain.connect(this.masterGain);
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(gain);
+    this.activeSfxNodes.add(src);
+    src.onended = () => {
+      this.activeSfxNodes.delete(src);
+      try {
+        gain.disconnect();
+      } catch {
+        // ignore
+      }
+    };
+    src.start(now);
+    return true;
   }
 
   public setMuted(mute: boolean): void {
@@ -298,7 +433,53 @@ export class SoundEngine {
   }
 
   public silenceLoops(): void {
+    this.loopsSilenced = true;
     this.stopActiveVoice();
+    this.bgmStarting = false;
+    this.stormSfxStarting = false;
+    if (this.bgmSrc) {
+      try {
+        this.bgmSrc.stop();
+        this.bgmSrc.disconnect();
+      } catch {
+        // already stopped
+      }
+      this.bgmSrc = null;
+    }
+    if (this.bgmGain) {
+      try {
+        this.bgmGain.disconnect();
+      } catch {
+        // ignore
+      }
+      this.bgmGain = null;
+    }
+    if (this.stormSfxSrc) {
+      try {
+        this.stormSfxSrc.stop();
+        this.stormSfxSrc.disconnect();
+      } catch {
+        // already stopped
+      }
+      this.stormSfxSrc = null;
+    }
+    if (this.stormSfxGain) {
+      try {
+        this.stormSfxGain.disconnect();
+      } catch {
+        // ignore
+      }
+      this.stormSfxGain = null;
+    }
+    for (const node of this.activeSfxNodes) {
+      try {
+        node.stop();
+        node.disconnect();
+      } catch {
+        // already stopped
+      }
+    }
+    this.activeSfxNodes.clear();
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     this.rumbleGain?.gain.setTargetAtTime(0, now, 0.08);
@@ -558,7 +739,27 @@ export class SoundEngine {
     }
   }
 
+  private async playCountdownFullClip(): Promise<boolean> {
+    if (!this.ensurePlayable() || !this.ctx || !this.radioInput) return false;
+    this.stopActiveVoice();
+    const token = this.activeVoiceToken;
+    const customClip = await this.tryFetchStaticClip('/audio/voiceovers/countdown_full.mp3');
+    if (
+      !customClip ||
+      token !== this.activeVoiceToken ||
+      !this.ensurePlayable() ||
+      !this.ctx ||
+      !this.radioInput
+    ) {
+      return false;
+    }
+    this.usingCountdownFullClip = true;
+    this.playBufferThroughRadio(customClip, token);
+    return true;
+  }
+
   private async playCountdownRadioWord(count: number): Promise<void> {
+    if (this.usingCountdownFullClip) return;
     if (!this.ensurePlayable() || !this.ctx || !this.radioInput) return;
     const words: Record<number, string> = {
       5: 'T-minus five.',
@@ -785,12 +986,14 @@ export class SoundEngine {
     subtitleText = ''
   ): void {
     if (!this.ensurePlayable() || !this.ctx || !this.masterGain) return;
+    this.loopsSilenced = false;
     const now = this.ctx.currentTime;
 
     if (chapterId !== this.lastChapter) {
       this.lastChapter = chapterId;
       this.lastCountdownBeep = -1;
       this.lastCountdownSpoken = -1;
+      this.usingCountdownFullClip = false;
       this.lastWalkTick = -1;
       this.lastTransitTick = -1;
       this.lastConsoleTick = -1;
@@ -799,6 +1002,8 @@ export class SoundEngine {
       this.lastSubtitleKey = '';
       this.triggeredEvents.clear();
       this.stopActiveVoice();
+
+      void this.ensureCutsceneBgm();
 
       if (chapterId === 'earth_farewell') {
         this.playTone(392.0, 0.22, 'triangle', 0.18, 0);
@@ -859,7 +1064,7 @@ export class SoundEngine {
 
     // Chapter 2 boarding: hatch seal clunk & cockpit avionics chimes
     if (chapterId === 'boarding') {
-      if (localTime > 3.5) {
+      if (localTime > 6.6) {
         this.fireOnce('boarding_hatch', () => {
           this.playTone(110, 0.28, 'sawtooth', 0.24, 0, 52);
           this.playNoiseBurst(0.32, 'bandpass', 1200, 0.22, 0.1);
@@ -870,59 +1075,63 @@ export class SoundEngine {
       }
     }
 
-    // Chapter 3 launch: synced manly radio countdown ("T-minus five.. four.. three.. two.. one") + klaxons + ignition
+    // Chapter 3 launch: synced manly radio countdown + real rocket liftoff SFX + boosters
     if (chapterId === 'launch') {
-      if (!ignited && localTime >= 1.5 && countdownNumber >= 1 && countdownNumber <= 5) {
+      if (!ignited && localTime >= COUNTDOWN_START_TIME && countdownNumber >= 1 && countdownNumber <= 5) {
+        this.fireOnce('launch_countdown_full', () => {
+          void this.playCountdownFullClip();
+        });
         if (countdownNumber !== this.lastCountdownBeep) {
           this.lastCountdownBeep = countdownNumber;
           const freq = countdownNumber === 1 ? 1046.5 : 698.46;
-          this.playTone(freq, 0.22, 'triangle', 0.28);
-          this.playTone(freq * 0.5, 0.22, 'sine', 0.2);
+          this.playTone(freq, 0.16, 'triangle', this.usingCountdownFullClip ? 0.11 : 0.24);
         }
-        if (countdownNumber !== this.lastCountdownSpoken) {
+        if (!this.usingCountdownFullClip && countdownNumber !== this.lastCountdownSpoken) {
           this.lastCountdownSpoken = countdownNumber;
-          this.playCountdownRadioWord(countdownNumber);
+          if (!this.voiceBufferCache.has('/audio/voiceovers/countdown_full.mp3')) {
+            void this.playCountdownRadioWord(countdownNumber);
+          }
         }
       }
       if (ignited) {
         this.fireOnce('launch_ignite', () => {
-          this.playNoiseBurst(1.1, 'lowpass', 950, 0.42, 0);
-          this.playTone(92, 0.85, 'sawtooth', 0.28, 0, 48);
+          void this.playOneShotSfx('/audio/sfx/sfx_rocket_liftoff.mp3', 0.56);
+          this.playTone(92, 0.85, 'sawtooth', 0.18, 0, 48);
         });
-        if (localTime > 11.5) {
+        if (localTime > LAUNCH_IGNITION_TIME + 4.6) {
           this.fireOnce('booster_sep', () => {
-            this.playTone(145, 0.32, 'triangle', 0.28, 0, 65);
-            this.playNoiseBurst(0.28, 'bandpass', 1800, 0.24, 0.04);
+            this.playTone(145, 0.32, 'triangle', 0.26, 0, 65);
+            this.playNoiseBurst(0.28, 'bandpass', 1800, 0.2, 0.04);
             this.playTone(587.33, 0.18, 'sine', 0.16, 0.22);
           });
         }
       }
     }
 
-    // Chapter 4: Cockpit console keystrokes (0..3.8s), Zoom-out space swell (3.8s), Chronograph & Mars arrival
+    // Chapter 4: Cockpit console keystrokes (0..5.2s), Zoom-out space swell (5.5s), Chronograph & Mars arrival
     if (chapterId === 'transit_8_months') {
-      if (localTime < 3.8) {
+      if (localTime < 5.2) {
         const keyIdx = Math.floor(localTime * 3.1);
         if (keyIdx !== this.lastConsoleTick) {
           this.lastConsoleTick = keyIdx;
           this.playTone(960 + (keyIdx % 4) * 140, 0.045, 'sine', 0.1);
         }
       }
-      if (localTime >= 3.8) {
+      if (localTime >= 5.5) {
         this.fireOnce('transit_zoom_swell', () => {
           this.playSpaceChord('depart');
           this.playNoiseBurst(0.9, 'bandpass', 420, 0.16, 0);
         });
       }
-      if (localTime > 5.0 && localTime < 11.4) {
-        const tickIdx = Math.floor((localTime - 5.0) * 2.4);
+      if (localTime > 6.4 && localTime < 13.8) {
+        const tickIdx = Math.floor((localTime - 6.4) * 2.2);
         if (tickIdx !== this.lastTransitTick) {
           this.lastTransitTick = tickIdx;
           const pitch = 440 + tickIdx * 24;
           this.playTone(Math.min(1040, pitch), 0.09, 'sine', 0.12);
         }
       }
-      if (localTime >= 10.6) {
+      if (localTime >= 12.8) {
         this.fireOnce('transit_mars_arrive', () => {
           this.playSpaceChord('arrive');
         });
@@ -956,15 +1165,18 @@ export class SoundEngine {
         }
       }
       if (localTime >= 5.8 && localTime < 11.8) {
+        const hasRealAlert = this.voiceBufferCache.has('/audio/sfx/sfx_red_alert.mp3');
         this.fireOnce('sol19_red_alert', () => {
-          this.playTone(95, 0.35, 'sawtooth', 0.28, 0, 48);
-          this.playTone(980, 0.14, 'square', 0.18, 0.02);
+          void this.playOneShotSfx('/audio/sfx/sfx_red_alert.mp3', 0.42);
+          this.playTone(95, 0.35, 'sawtooth', 0.24, 0, 48);
         });
-        const alarmIdx = Math.floor((localTime - 5.8) / 1.15);
-        if (alarmIdx !== this.lastAlarmTick) {
-          this.lastAlarmTick = alarmIdx;
-          this.playTone(840, 0.22, 'sawtooth', 0.21, 0, 580);
-          this.playTone(620, 0.2, 'sawtooth', 0.18, 0.24, 480);
+        if (!hasRealAlert) {
+          const alarmIdx = Math.floor((localTime - 5.8) / 1.15);
+          if (alarmIdx !== this.lastAlarmTick) {
+            this.lastAlarmTick = alarmIdx;
+            this.playTone(840, 0.22, 'sawtooth', 0.21, 0, 580);
+            this.playTone(620, 0.2, 'sawtooth', 0.18, 0.24, 480);
+          }
         }
       }
       if (localTime >= 11.8) {
@@ -1042,18 +1254,33 @@ export class SoundEngine {
       padCutoff = 440;
     }
 
-    this.padGain?.gain.setTargetAtTime(padTarget, now, 0.18);
+    // Duct & modulate real bgm_space_cinematic.mp3 (or synthetic fallback pad if absent)
+    const voiceSpeaking = this.activeVoiceSrc !== null;
+    if (this.bgmGain) {
+      const bgmTarget =
+        chapterId === 'storm_evacuation' && localTime >= 15.8
+          ? 0.02
+          : voiceSpeaking
+          ? 0.11
+          : 0.26;
+      this.bgmGain.gain.setTargetAtTime(bgmTarget, now, 0.22);
+    }
+
+    const effectivePadTarget = this.bgmSrc ? 0 : padTarget;
+    this.padGain?.gain.setTargetAtTime(effectivePadTarget, now, 0.18);
     this.padFilter?.frequency.setTargetAtTime(padCutoff, now, 0.2);
     this.padOsc1?.frequency.setTargetAtTime(f1, now, 0.25);
     this.padOsc2?.frequency.setTargetAtTime(f2, now, 0.25);
     this.padOsc3?.frequency.setTargetAtTime(f3, now, 0.25);
 
-    // Continuous Rocket / Thruster Roar
+    // Continuous Rocket / Thruster Roar (duck synthetic noise when sfx_rocket_liftoff is loaded)
+    const hasRealLiftoff = this.voiceBufferCache.has('/audio/sfx/sfx_rocket_liftoff.mp3');
     let rumbleTarget = 0;
     let rumbleFreq = 220;
     if (chapterId === 'launch' && ignited) {
-      rumbleTarget = localTime < 11.5 ? 0.72 : 0.35;
-      rumbleFreq = localTime < 9.5 ? 380 : 180;
+      const maxRumble = hasRealLiftoff ? 0.18 : 0.72;
+      rumbleTarget = localTime < LAUNCH_IGNITION_TIME + 4.6 ? maxRumble : maxRumble * 0.45;
+      rumbleFreq = localTime < LAUNCH_IGNITION_TIME + 2.5 ? 340 : 180;
     } else if (chapterId === 'mars_landing' && localTime < 7.8) {
       rumbleTarget = 0.38;
       rumbleFreq = 280;
@@ -1064,13 +1291,14 @@ export class SoundEngine {
     this.rumbleGain?.gain.setTargetAtTime(rumbleTarget, now, 0.12);
     this.rumbleFilter?.frequency.setTargetAtTime(rumbleFreq, now, 0.12);
 
-    // Continuous Wind & Airlock Hiss
+    // Continuous Wind & Airlock Hiss + Real sfx_dust_storm.mp3
     let stormTarget = 0;
     let stormFreq = 380;
-    if (chapterId === 'boarding' && localTime > 3.2 && localTime < 4.5) {
+    if (chapterId === 'boarding' && localTime > 6.4 && localTime < 7.8) {
       stormTarget = 0.22;
       stormFreq = 1050;
     } else if (chapterId === 'storm_evacuation') {
+      void this.ensureStormSfxLoop();
       if (localTime < 5.8) {
         stormTarget = 0.08 + Math.max(0, (localTime - 3.8) * 0.03);
         stormFreq = 320;
@@ -1086,7 +1314,22 @@ export class SoundEngine {
       stormTarget = 0.11;
       stormFreq = 310;
     }
-    this.stormGain?.gain.setTargetAtTime(stormTarget, now, 0.15);
+
+    if (this.stormSfxGain) {
+      const sfxWindTarget =
+        chapterId === 'storm_evacuation' && localTime >= 5.6
+          ? voiceSpeaking
+            ? Math.min(0.28, stormTarget * 0.55)
+            : Math.min(0.55, stormTarget * 0.85)
+          : 0;
+      this.stormSfxGain.gain.setTargetAtTime(sfxWindTarget, now, 0.18);
+    }
+
+    const noiseStormGain =
+      this.stormSfxSrc && chapterId === 'storm_evacuation' && localTime >= 5.8
+        ? stormTarget * 0.18
+        : stormTarget;
+    this.stormGain?.gain.setTargetAtTime(noiseStormGain, now, 0.15);
     this.stormFilter?.frequency.setTargetAtTime(stormFreq, now, 0.15);
   }
 }

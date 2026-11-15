@@ -482,8 +482,22 @@ export default function App() {
   useEffect(() => {
     return () => {
       soundEngine.stopAmbientSpaceLoop();
+      soundEngine.stopDustStormLoop();
     };
   }, []);
+
+  // Real Mars dust storm loop (louder outdoors, muffled inside station/shelter)
+  useEffect(() => {
+    const stormActive =
+      !isIntroPlaying && !missionOutcome && !muted && dustStormPhase === 'raging';
+    if (!stormActive) {
+      soundEngine.stopDustStormLoop();
+      return;
+    }
+    const sheltered = inShelter || worldLocation === 'inside';
+    void soundEngine.startDustStormLoop(sheltered);
+    soundEngine.setDustStormSheltered(sheltered);
+  }, [isIntroPlaying, missionOutcome, muted, dustStormPhase, inShelter, worldLocation]);
 
   const tutorialChecklist = useMemo<TutorialGoalItem[]>(() => {
     const items: TutorialGoalItem[] = [];
@@ -751,6 +765,7 @@ export default function App() {
       setIsDustStorm(true);
       setStormTriggeredDay(day);
       soundEngine.playAdvanceSol(true);
+      void soundEngine.playRedAlertSfx();
       if (voiceEnabled) {
         soundEngine.playVoiceClip(
           'game_dust_storm',
@@ -1614,6 +1629,9 @@ export default function App() {
       setShelterGraceSec(0);
       setStormSecondsLeft(0);
       soundEngine.playAdvanceSol(curSolarStorm);
+      if (curSolarStorm) {
+        void soundEngine.playRedAlertSfx();
+      }
 
       if (stoppedEarlyReason) {
         setSampleToast({
