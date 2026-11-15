@@ -34,13 +34,13 @@ interface BottomControlDockProps {
 
 const VIEW_TABS: Array<{ id: ModuleId; label: string }> = [
   { id: 'overview', label: 'Base View' },
-  { id: 'crew', label: 'Astronauts' },
-  { id: 'habitat', label: 'Habitat' },
-  { id: 'greenhouse', label: 'Greenhouse' },
-  { id: 'lifesupport', label: 'Air & Water' },
+  { id: 'crew', label: 'Med-Bay & Gym' },
+  { id: 'habitat', label: 'Active Defense' },
+  { id: 'greenhouse', label: 'Potato Farm' },
+  { id: 'lifesupport', label: 'ECLSS & Shower' },
   { id: 'solar', label: 'Solar Grid' },
-  { id: 'science', label: 'Rover' },
-  { id: 'comms', label: 'Comms' },
+  { id: 'science', label: 'Mars Buggy' },
+  { id: 'comms', label: 'Sat-Comms' },
 ];
 
 const LEVEL_LABELS = ['Off', '1', '2', '3'];
@@ -53,25 +53,25 @@ const POWER_ROWS: Array<{
 }> = [
   {
     key: 'lifesupport',
-    label: 'Air & Water',
+    label: 'Life Support (CO₂/Heat)',
     activeClass: 'bg-sky-500 text-slate-950',
     icon: <Droplets className="h-4 w-4 text-sky-400" />,
   },
   {
     key: 'greenhouse',
-    label: 'Food Garden',
+    label: 'Potato Bio-Dome',
     activeClass: 'bg-emerald-500 text-slate-950',
     icon: <Sprout className="h-4 w-4 text-emerald-400" />,
   },
   {
     key: 'shield',
-    label: 'Storm Shield',
+    label: 'Active Defense (EDS)',
     activeClass: 'bg-amber-400 text-slate-950',
     icon: <Shield className="h-4 w-4 text-amber-400" />,
   },
   {
     key: 'science',
-    label: 'Rover Science',
+    label: 'Buggy & Sat-Comms',
     activeClass: 'bg-cyan-400 text-slate-950',
     icon: <Cpu className="h-4 w-4 text-cyan-400" />,
   },

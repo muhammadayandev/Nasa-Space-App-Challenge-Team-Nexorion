@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ModuleId, OutpostSiteId } from '../data/missionScenarios';
+import { FIELD_SAMPLES, ModuleId, OutpostSiteId } from '../data/missionScenarios';
 import { ProceduralTextureSet } from './textures';
 
 export function groundHeightAt(x: number, z: number, site: OutpostSiteId): number {
@@ -31,6 +31,7 @@ export interface AstronautHandle {
   rightLeg: THREE.Group;
   leftArm: THREE.Group;
   rightArm: THREE.Group;
+  suitAccentMat: THREE.MeshStandardMaterial;
   homePos: THREE.Vector2;
   workPos: THREE.Vector2;
 }
@@ -64,6 +65,8 @@ export interface OutpostDynamicHandles {
   playerMarker: THREE.Mesh;
   npcAstronauts: AstronautHandle[];
   stationRings: Record<string, THREE.Mesh>;
+  sampleNodes: Record<string, THREE.Group>;
+  walkTargetRing: THREE.Mesh;
   landingPadPos: THREE.Vector3;
   landedShip: SpacecraftHandle;
   selectionRing: THREE.Mesh;
@@ -222,6 +225,7 @@ function createAstronaut(
     rightLeg,
     leftArm,
     rightArm,
+    suitAccentMat: suitAccent,
     homePos,
     workPos,
   };
@@ -867,24 +871,7 @@ export function buildOutpostModules(
   playerAstro.group.add(playerMarker);
   outpostRoot.add(playerAstro.group);
 
-  const npcAstronauts: AstronautHandle[] = [
-    createAstronaut(
-      'Botanist Leo',
-      0x22c55e,
-      textures.contactShadow,
-      clickableProxies,
-      new THREE.Vector2(2.6, 3.2),
-      new THREE.Vector2(5.4, 2.6)
-    ),
-    createAstronaut(
-      'Engineer Zara',
-      0x0ea5e9,
-      textures.contactShadow,
-      clickableProxies,
-      new THREE.Vector2(-1.6, 4.2),
-      new THREE.Vector2(-1.8, 4.8)
-    ),
-  ];
+  const npcAstronauts: AstronautHandle[] = [];
 
   npcAstronauts.forEach((astro) => {
     astro.group.position.set(
@@ -921,6 +908,72 @@ export function buildOutpostModules(
     outpostRoot.add(ring);
     stationRings[cfg.id] = ring;
   });
+
+  // Collectible 3D Martian/Lunar Field Samples & Resource Caches
+  const sampleNodes: Record<string, THREE.Group> = {};
+  FIELD_SAMPLES.forEach((smp) => {
+    const smpGroup = new THREE.Group();
+    const sy = groundHeightAt(smp.x, smp.z, site);
+    smpGroup.position.set(smp.x, sy, smp.z);
+
+    const crystal = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.45, 0),
+      new THREE.MeshStandardMaterial({
+        color: smp.colorHex,
+        emissive: smp.colorHex,
+        emissiveIntensity: 0.9,
+        roughness: 0.15,
+        metalness: 0.25,
+      })
+    );
+    crystal.position.y = 0.85;
+    crystal.castShadow = true;
+    crystal.userData.isCrystal = true;
+    smpGroup.add(crystal);
+
+    const haloRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.65, 0.86, 28),
+      new THREE.MeshBasicMaterial({
+        color: smp.colorHex,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.72,
+      })
+    );
+    haloRing.rotation.x = -Math.PI / 2;
+    haloRing.position.y = 0.05;
+    smpGroup.add(haloRing);
+
+    const beaconBeam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.16, 2.4, 10, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: smp.colorHex,
+        transparent: true,
+        opacity: 0.22,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    beaconBeam.position.y = 1.2;
+    smpGroup.add(beaconBeam);
+
+    outpostRoot.add(smpGroup);
+    sampleNodes[smp.id] = smpGroup;
+  });
+
+  // Destination Ring shown when clicking on terrain to walk
+  const walkTargetRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.35, 0.55, 24),
+    new THREE.MeshBasicMaterial({
+      color: 0xfacc15,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.85,
+    })
+  );
+  walkTargetRing.rotation.x = -Math.PI / 2;
+  walkTargetRing.visible = false;
+  outpostRoot.add(walkTargetRing);
 
   const selectionRing = new THREE.Mesh(
     new THREE.RingGeometry(2.6, 2.95, 48),
@@ -966,6 +1019,8 @@ export function buildOutpostModules(
     playerMarker,
     npcAstronauts,
     stationRings,
+    sampleNodes,
+    walkTargetRing,
     landingPadPos,
     landedShip,
     selectionRing,

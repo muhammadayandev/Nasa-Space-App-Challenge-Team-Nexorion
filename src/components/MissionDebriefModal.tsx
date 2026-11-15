@@ -1,139 +1,149 @@
 import React from 'react';
-import { Award, RotateCcw, ShieldAlert, Trophy } from 'lucide-react';
-import { OutpostSiteId, SITE_CONFIGS } from '../data/missionScenarios';
+import { ArrowRight, LockOpen, Menu, RotateCcw } from 'lucide-react';
+import { GameLevelSpec } from '../data/missionScenarios';
 
 interface MissionDebriefModalProps {
   outcome: 'victory' | 'failed';
   failureReason: string | null;
-  site: OutpostSiteId;
-  day: number;
-  science: number;
-  scienceGoal: number;
+  level: GameLevelSpec;
+  hasNextLevel: boolean;
+  unlockedNextLevel: boolean;
   crewHealth: number;
   lifeSupport: number;
   food: number;
-  onReplaySame: () => void;
-  onSwitchAndReplay: (nextSite: OutpostSiteId) => void;
+  science: number;
+  onNextLevel: () => void;
+  onReplayLevel: () => void;
+  onOpenMenu: () => void;
 }
 
 export const MissionDebriefModal: React.FC<MissionDebriefModalProps> = ({
   outcome,
   failureReason,
-  site,
-  day,
-  science,
-  scienceGoal,
+  level,
+  hasNextLevel,
+  unlockedNextLevel,
   crewHealth,
   lifeSupport,
   food,
-  onReplaySame,
-  onSwitchAndReplay,
+  science,
+  onNextLevel,
+  onReplayLevel,
+  onOpenMenu,
 }) => {
-  const siteCfg = SITE_CONFIGS[site];
-  const otherSite: OutpostSiteId = site === 'moon' ? 'mars' : 'moon';
-  const otherCfg = SITE_CONFIGS[otherSite];
   const isWin = outcome === 'victory';
-
-  const badges: string[] = [];
-  if (crewHealth >= 75) badges.push('Radiation Safety Chief');
-  if (science >= scienceGoal) badges.push('NASA Sample Explorer');
-  if (food >= 60 && lifeSupport >= 60) badges.push('Master Life-Support Engineer');
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="debrief-title"
     >
-      <div className="w-full max-w-xl rounded-2xl border border-slate-700 bg-[#0B1120] p-6 shadow-2xl">
-        <div className="flex items-center gap-3">
-          {isWin ? (
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400">
-              <Trophy className="h-6 w-6" />
-            </div>
-          ) : (
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 text-rose-400">
-              <ShieldAlert className="h-6 w-6" />
-            </div>
-          )}
-          <div>
-            <p className="text-xs font-semibold text-slate-400">
-              {siteCfg.missionLabel} · Ended on {siteCfg.dayUnit} {day}
-            </p>
-            <h2 id="debrief-title" className="font-display text-2xl font-bold text-white">
-              {isWin ? 'Mission Complete!' : 'Outpost Emergency Evacuation'}
-            </h2>
-          </div>
+      <div
+        className={`w-full max-w-2xl rounded-[2rem] border-4 bg-[#081020] p-7 sm:p-10 text-center shadow-2xl animate-[popupSlideUp_0.3s_ease-out] ${
+          isWin ? 'border-emerald-400' : 'border-rose-400'
+        }`}
+      >
+        <div
+          className={`mx-auto flex h-20 w-20 items-center justify-center rounded-3xl text-5xl ${
+            isWin ? 'bg-emerald-500/20' : 'bg-rose-500/20'
+          }`}
+        >
+          {isWin ? '🏆' : '💪'}
         </div>
 
-        <p className="mt-4 text-sm leading-relaxed text-slate-200">
-          {isWin
-            ? science >= scienceGoal
-              ? `Awesome work, Commander! You balanced electricity, oxygen, food, and storm shielding across ${siteCfg.name} while collecting ${science} NASA science samples.`
-              : `Your crew survived all ${day} ${siteCfg.dayUnit.toLowerCase()}s safely! Next mission, try routing a bit more power to the Rover & Comms Dish to hit ${scienceGoal} science samples.`
-            : failureReason ||
-              'One of your outpost systems ran empty. Real NASA planners learn from every simulation test — try a new power balance!'}
+        <p className="mt-4 text-xs font-extrabold uppercase tracking-widest text-amber-400">
+          Level {level.id} · {level.title}
         </p>
 
-        {/* Final Metrics */}
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-            <p className="text-[11px] text-slate-400">Crew Health</p>
-            <p className="mt-1 font-mono-tabular text-lg font-bold text-white">
-              {Math.round(crewHealth)}%
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-            <p className="text-[11px] text-slate-400">Air & Water</p>
-            <p className="mt-1 font-mono-tabular text-lg font-bold text-white">
-              {Math.round(lifeSupport)}%
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-            <p className="text-[11px] text-slate-400">Food Supply</p>
-            <p className="mt-1 font-mono-tabular text-lg font-bold text-white">
-              {Math.round(food)}%
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-            <p className="text-[11px] text-slate-400">Science</p>
-            <p className="mt-1 font-mono-tabular text-lg font-bold text-cyan-300">
-              {science}/{scienceGoal}
-            </p>
-          </div>
+        <h2
+          id="debrief-title"
+          className="mt-1 font-display text-3xl sm:text-4xl font-extrabold text-white"
+        >
+          {isWin ? 'Awesome Job!' : 'Good Try! One More Time!'}
+        </h2>
+
+        <div
+          className={`mt-5 rounded-2xl border-2 p-4 text-left ${
+            isWin
+              ? 'border-emerald-400/40 bg-emerald-500/10'
+              : 'border-rose-400/40 bg-rose-500/10'
+          }`}
+        >
+          <p className="text-xs font-extrabold uppercase tracking-wide text-white">
+            {isWin ? level.lessonTitle : 'What Happened'}
+          </p>
+          <p className="mt-1 text-base sm:text-lg font-medium text-slate-100">
+            {isWin
+              ? level.lessonText
+              : failureReason || 'Keep an eye on Health, Air, Food, and your Level Goal!'}
+          </p>
         </div>
 
-        {badges.length > 0 && (
-          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/80 p-3.5">
-            <p className="text-xs font-semibold text-amber-400">Explorer Certificates Earned</p>
-            <div className="mt-2 flex flex-wrap gap-3">
-              {badges.map((b) => (
-                <span key={b} className="inline-flex items-center gap-1.5 text-xs font-medium text-white">
-                  <Award className="h-4 w-4 text-amber-400" />
-                  {b}
-                </span>
-              ))}
-            </div>
+        {isWin && unlockedNextLevel && hasNextLevel && (
+          <div className="mt-4 inline-flex items-center gap-2 rounded-2xl border-2 border-amber-400/60 bg-amber-500/20 px-5 py-2.5 text-sm font-extrabold text-amber-300">
+            <LockOpen className="h-4 w-4" />
+            <span>Level {level.id + 1} Unlocked!</span>
           </div>
         )}
 
-        <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <div className="mt-5 grid grid-cols-4 gap-2.5 text-center">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-2.5">
+            <p className="text-[11px] font-bold text-slate-400">Health</p>
+            <p className="font-mono-tabular text-base font-extrabold text-white">
+              {Math.round(crewHealth)}%
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-2.5">
+            <p className="text-[11px] font-bold text-slate-400">Air</p>
+            <p className="font-mono-tabular text-base font-extrabold text-white">
+              {Math.round(lifeSupport)}%
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-2.5">
+            <p className="text-[11px] font-bold text-slate-400">Food</p>
+            <p className="font-mono-tabular text-base font-extrabold text-white">
+              {Math.round(food)}%
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-2.5">
+            <p className="text-[11px] font-bold text-slate-400">Science</p>
+            <p className="font-mono-tabular text-base font-extrabold text-cyan-300">{science}</p>
+          </div>
+        </div>
+
+        <div className="mt-7 flex flex-wrap items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => onSwitchAndReplay(otherSite)}
-            className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 hover:text-white transition-colors"
+            onClick={onOpenMenu}
+            className="inline-flex items-center gap-1.5 rounded-2xl border-b-4 border-slate-950 bg-slate-800 px-4 py-3 text-sm font-extrabold text-slate-200 hover:bg-slate-700 active:translate-y-0.5 active:border-b-2"
           >
-            Try {otherCfg.name}
+            <Menu className="h-4 w-4" />
+            <span>Menu</span>
           </button>
-          <button
-            type="button"
-            onClick={onReplaySame}
-            className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 font-display text-sm font-bold text-slate-950 hover:bg-amber-400 transition-colors"
-          >
-            <RotateCcw className="h-4 w-4" />
-            <span>Play Again</span>
-          </button>
+
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={onReplayLevel}
+              className="inline-flex items-center gap-1.5 rounded-2xl border-b-4 border-slate-950 bg-slate-800 px-4 py-3 text-sm font-extrabold text-white hover:bg-slate-700 active:translate-y-0.5 active:border-b-2"
+            >
+              <RotateCcw className="h-4 w-4" />
+              <span>Play Again</span>
+            </button>
+
+            {isWin && hasNextLevel && (
+              <button
+                type="button"
+                onClick={onNextLevel}
+                className="inline-flex items-center gap-1.5 rounded-2xl border-b-4 border-emerald-600 bg-emerald-400 px-6 py-3 font-display text-base font-extrabold text-slate-950 hover:bg-emerald-300 active:translate-y-0.5 active:border-b-2"
+              >
+                <span>Next Level</span>
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

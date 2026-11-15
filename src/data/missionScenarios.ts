@@ -14,6 +14,7 @@ export type PowerSystemKey = 'lifesupport' | 'greenhouse' | 'shield' | 'science'
 
 export interface StationPoint {
   id: Exclude<ModuleId, 'overview'>;
+  shortName: string;
   x: number;
   z: number;
   interactRadius: number;
@@ -24,51 +25,57 @@ export interface StationPoint {
 export const STATION_POINTS: StationPoint[] = [
   {
     id: 'habitat',
+    shortName: 'Shield',
     x: 0,
     z: 0,
     interactRadius: 5.4,
     collisionRadius: 3.6,
-    promptAction: 'Manage Storm Shield & Rest for Next Day',
+    promptAction: 'Boost Shield & Sleep',
   },
   {
     id: 'greenhouse',
+    shortName: 'Farm',
     x: 7.2,
     z: 0,
     interactRadius: 4.5,
     collisionRadius: 2.7,
-    promptAction: 'Tend Crops & Harvest Fresh Food',
+    promptAction: 'Grow & Harvest Food',
   },
   {
     id: 'solar',
+    shortName: 'Solar',
     x: -7.6,
     z: -3.2,
     interactRadius: 4.8,
     collisionRadius: 2.6,
-    promptAction: 'Inspect Batteries & Clean Solar Panels',
+    promptAction: 'Clean Dust for Power',
   },
   {
     id: 'lifesupport',
+    shortName: 'Air',
     x: -4.2,
     z: 5.8,
     interactRadius: 4.4,
     collisionRadius: 2.4,
-    promptAction: 'Check O₂/Water Tanks & Scrub Air Filters',
+    promptAction: 'Make Clean Air & Water',
   },
   {
     id: 'comms',
+    shortName: 'Radio',
     x: 3.2,
     z: -6.8,
     interactRadius: 3.8,
     collisionRadius: 1.7,
-    promptAction: 'Beam Science to Earth & Check Space Weather',
+    promptAction: 'Send Message to Earth',
   },
   {
     id: 'science',
+    shortName: 'Rover',
     x: 4.8,
     z: 6.2,
     interactRadius: 4.2,
     collisionRadius: 1.8,
-    promptAction: 'Operate Rover Drill & Scan Rocks',
+    promptAction: 'Drive Rover & Collect Science',
   },
 ];
 
@@ -87,33 +94,33 @@ export interface SiteConfig {
 }
 
 export const SITE_CONFIGS: Record<OutpostSiteId, SiteConfig> = {
-  moon: {
-    id: 'moon',
-    name: 'Shackleton Crater Rim',
-    subtitle: 'Lunar South Pole',
-    missionLabel: 'Artemis Lunar Outpost',
-    dayUnit: 'Day',
-    gravityG: 0.165,
-    commDelayText: '1.3 sec one-way',
-    baseRadiationMsv: 1.37,
-    maxSolarCells: 8,
-    nasaReference: 'NASA Artemis / LRO CRaTER Data',
-    environmentFact:
-      'High crater rims catch long sunlight, while deep shadows hold water ice at -170°C. Zero air means high radiation!',
-  },
   mars: {
     id: 'mars',
-    name: 'Jezero Crater Delta',
-    subtitle: 'Mars Surface',
-    missionLabel: 'Perseverance Mars Outpost',
-    dayUnit: 'Sol',
+    name: 'Mars Base',
+    subtitle: 'Red Planet',
+    missionLabel: 'Mars Explorer',
+    dayUnit: 'Day',
     gravityG: 0.38,
-    commDelayText: '12 min one-way',
+    commDelayText: '12 min radio delay',
     baseRadiationMsv: 0.67,
     maxSolarCells: 8,
-    nasaReference: 'NASA Mars Trek / Curiosity RAD',
+    nasaReference: 'NASA Mars Trek & Curiosity RAD',
     environmentFact:
-      'A Martian Sol lasts 24h 39m. Thin CO₂ air softens radiation slightly, but global dust storms can dim solar panels!',
+      'Mars is cold and dusty. Radio messages take 12 minutes to reach Earth!',
+  },
+  moon: {
+    id: 'moon',
+    name: 'Moon Base',
+    subtitle: 'Lunar South Pole',
+    missionLabel: 'Moon Explorer',
+    dayUnit: 'Day',
+    gravityG: 0.165,
+    commDelayText: '1.3 sec radio delay',
+    baseRadiationMsv: 1.37,
+    maxSolarCells: 8,
+    nasaReference: 'NASA Artemis & LRO CRaTER',
+    environmentFact:
+      'The Moon has no air at all. Astronauts need strong shields and clean air tanks!',
   },
 };
 
@@ -130,80 +137,197 @@ export interface ModuleSpec {
 export const MODULE_SPECS: Record<Exclude<ModuleId, 'overview'>, ModuleSpec> = {
   crew: {
     id: 'crew',
-    name: 'Astronaut Team (Maya, Leo & Zara)',
-    shortName: 'Astronauts',
-    role: 'Outpost Explorers & Scientists',
-    plainExplanation:
-      'Commander Maya leads base safety, Botanist Leo tends the hydroponic crops, and Engineer Zara keeps life support and the rover running. They move around the base to do their jobs—and run inside the Habitat when a solar storm hits!',
-    tradeOffTip:
-      'Your crew needs steady Air & Water, fresh Food, and Storm Shielding to stay strong. Pushing too hard without protection lowers Crew Health.',
+    name: 'Crew & Health Pod',
+    shortName: 'Crew',
+    role: 'Switch Astronauts & Check Health',
+    plainExplanation: 'Pick who walks outside and give the crew rest or a quick checkup.',
+    tradeOffTip: 'Healthy meals and rest keep Energy and Health strong.',
   },
   habitat: {
     id: 'habitat',
-    name: 'Crew Habitat & Water-Wall Shield',
-    shortName: 'Habitat',
-    role: 'Home & Radiation Storm Shelter',
-    plainExplanation:
-      'Four astronauts sleep, eat, and monitor computers inside this pressurized dome. Heavy water-wall shutters slide closed during solar flares to block harmful space rays.',
-    tradeOffTip:
-      'Powering the active shield & storm shutters keeps crew health high during solar storms, but leaves less power for growing food or running the rover.',
+    name: 'Main Dome & Shield',
+    shortName: 'Shield',
+    role: 'Radiation Shield & Sleep',
+    plainExplanation: 'Protects astronauts from Sun rays and lets you start the next day.',
+    tradeOffTip: 'More Shield power keeps you safe, but leaves less power for Science.',
     powerKey: 'shield',
   },
   solar: {
     id: 'solar',
-    name: 'Solar Array & Battery Bank',
-    shortName: 'Solar Grid',
-    role: 'Electricity Generator',
-    plainExplanation:
-      'Articulated photovoltaic wings tilt to catch sunlight and charge lithium batteries. Because electricity is limited, you decide where every Power Cell goes.',
-    tradeOffTip:
-      'Dust storms on Mars or deep crater shadows on the Moon reduce total available Power Cells — forcing tough choices!',
+    name: 'Solar Panels',
+    shortName: 'Solar',
+    role: 'Makes Base Electricity',
+    plainExplanation: 'Sunlight hits these panels to charge batteries for your whole base.',
+    tradeOffTip: 'Cleaning dust gives +1 Power tomorrow, at a small Air & Health cost.',
   },
   greenhouse: {
     id: 'greenhouse',
-    name: 'Hydroponics Greenhouse',
-    shortName: 'Greenhouse',
-    role: 'Fresh Food & Oxygen Helper',
-    plainExplanation:
-      'Purple and white LED grow lights help spinach, dwarf tomatoes, and lettuce grow in mineral water without soil (inspired by NASA VEGGIE & OSD-102).',
-    tradeOffTip:
-      'Giving 2–3 Power Cells grows extra food and creates bonus oxygen, but uses electricity and recycled water.',
+    name: 'Space Garden',
+    shortName: 'Farm',
+    role: 'Grows Fresh Food',
+    plainExplanation: 'Purple LED lights help plants grow without soil!',
+    tradeOffTip: 'Growing food feeds the crew and makes oxygen, but uses Water and Power.',
     powerKey: 'greenhouse',
   },
   lifesupport: {
     id: 'lifesupport',
-    name: 'ECLSS Life Support & Water Recycler',
-    shortName: 'Life Support',
-    role: 'Air & Water Recycling',
-    plainExplanation:
-      'Scrubs stale carbon dioxide out of the air, splits water into breathable oxygen, and recycles 98% of cabin water just like on the International Space Station.',
-    tradeOffTip:
-      'Under-powering Life Support saves electricity for science today, but oxygen and clean water will drop dangerously fast!',
+    name: 'Air & Water Machine',
+    shortName: 'Air',
+    role: 'Recycles Breathable Air & Water',
+    plainExplanation: 'Cleans stale air and recycles 98% of water just like the Space Station!',
+    tradeOffTip: 'Keep Air at 2+ Power so oxygen never runs low.',
     powerKey: 'lifesupport',
   },
   comms: {
     id: 'comms',
-    name: 'Deep Space Comms Dish',
-    shortName: 'Comms',
-    role: 'Earth Link & Data Transmission',
-    plainExplanation:
-      'A steerable parabolic dish beams rock scans and crew checkups back to Earth Mission Control across hundreds of thousands or millions of kilometers.',
-    tradeOffTip:
-      'Transmitting high-speed science packets uses Rover/Science power and faces real light-speed delays (1.3s Moon vs 12m Mars).',
+    name: 'Earth Radio Dish',
+    shortName: 'Radio',
+    role: 'Calls Mission Control',
+    plainExplanation: 'Sends science news back to NASA scientists on Earth.',
+    tradeOffTip: 'Sending big data earns Science Points, but uses extra cooling water.',
     powerKey: 'science',
   },
   science: {
     id: 'science',
-    name: 'Explore Rover & Regolith Drill',
+    name: 'Mars Rover',
     shortName: 'Rover',
-    role: 'Sample Collection & Exploration',
-    plainExplanation:
-      'A 6-wheeled NASA rocker-bogie rover drives across craters to drill soil samples and hunt for frozen water ice.',
-    tradeOffTip:
-      'Funding Science earns Mission Points toward victory, but every cell spent on the rover is a cell not protecting or feeding the crew!',
+    role: 'Drills Rocks & Finds Ice',
+    plainExplanation: 'A 6-wheeled robot that searches craters for water ice and cool rocks.',
+    tradeOffTip: 'Rover digs earn Science Points, but take extra Power and Air.',
     powerKey: 'science',
   },
 };
+
+export interface GameLevelSpec {
+  id: number;
+  title: string;
+  emoji: string;
+  site: OutpostSiteId;
+  maxDays: number;
+  goalText: string;
+  lessonTitle: string;
+  lessonText: string;
+  tradeOffText: string;
+  initialAir: number;
+  initialFood: number;
+  initialHealth: number;
+  initialDust: number;
+  initialPower: Record<PowerSystemKey, number>;
+  stormDay: number | null;
+  dustDay: number | null;
+  requiredActionId?: string;
+  requiredMinAir?: number;
+  requiredMinFood?: number;
+  requiredMaxDust?: number;
+  requiredMinShield?: number;
+  requiredSamples?: number;
+  requiredScience?: number;
+}
+
+export const GAME_LEVELS: GameLevelSpec[] = [
+  {
+    id: 1,
+    title: 'First Breath',
+    emoji: '🫧',
+    site: 'mars',
+    maxDays: 2,
+    goalText: 'Keep Air 75%+ & finish Day 2',
+    lessonTitle: 'Lesson 1: Why Air Needs Power',
+    lessonText:
+      'Mars has almost no breathable air. Your Air Machine needs electricity every day!',
+    tradeOffText: 'Tip: Visit the Air station or keep Air Power at 2 or 3.',
+    initialAir: 76,
+    initialFood: 85,
+    initialHealth: 92,
+    initialDust: 10,
+    initialPower: { lifesupport: 2, greenhouse: 2, shield: 2, science: 2 },
+    stormDay: null,
+    dustDay: null,
+    requiredMinAir: 75,
+  },
+  {
+    id: 2,
+    title: 'Space Garden',
+    emoji: '🌱',
+    site: 'mars',
+    maxDays: 2,
+    goalText: 'Harvest Farm once & finish Day 2',
+    lessonTitle: 'Lesson 2: Growing Food in Space',
+    lessonText:
+      'Rockets are small, so astronauts grow fresh veggies using LED lights and recycled water!',
+    tradeOffText: 'Tip: Walk to Farm, harvest crops (+Food), and watch your Water level.',
+    initialAir: 85,
+    initialFood: 66,
+    initialHealth: 90,
+    initialDust: 15,
+    initialPower: { lifesupport: 2, greenhouse: 2, shield: 2, science: 2 },
+    stormDay: null,
+    dustDay: null,
+    requiredActionId: 'harvest-greens',
+    requiredMinFood: 70,
+  },
+  {
+    id: 3,
+    title: 'Dusty Panels',
+    emoji: '☀️',
+    site: 'mars',
+    maxDays: 2,
+    goalText: 'Clean Solar Panels & finish Day 2',
+    lessonTitle: 'Lesson 3: Dust Cuts Power',
+    lessonText:
+      'Red dust covers solar panels on Mars. Less sunlight means less power for the base!',
+    tradeOffText: 'Tip: Walk to Solar and brush off dust to earn +1 Power tomorrow.',
+    initialAir: 84,
+    initialFood: 82,
+    initialHealth: 88,
+    initialDust: 70,
+    initialPower: { lifesupport: 2, greenhouse: 2, shield: 1, science: 1 },
+    stormDay: null,
+    dustDay: 1,
+    requiredMaxDust: 15,
+  },
+  {
+    id: 4,
+    title: 'Solar Storm!',
+    emoji: '🛡️',
+    site: 'mars',
+    maxDays: 2,
+    goalText: 'Raise Shield to 2+ & survive storm',
+    lessonTitle: 'Lesson 4: Space Weather & Radiation',
+    lessonText:
+      'The Sun shoots invisible rays during solar flares. Water walls and shields keep crews safe!',
+    tradeOffText: 'Tip: Raise Shield Power in Habitat (or fill Water Shield) before Day 2 ends.',
+    initialAir: 86,
+    initialFood: 82,
+    initialHealth: 90,
+    initialDust: 20,
+    initialPower: { lifesupport: 2, greenhouse: 2, shield: 1, science: 2 },
+    stormDay: 2,
+    dustDay: null,
+    requiredMinShield: 2,
+  },
+  {
+    id: 5,
+    title: 'Master Commander',
+    emoji: '🚀',
+    site: 'mars',
+    maxDays: 3,
+    goalText: 'Find 2 Crystals & earn 4 Science',
+    lessonTitle: 'Lesson 5: Real Mission Trade-Offs',
+    lessonText:
+      'Great commanders balance Air, Food, Shield, and Science all at once without running dry!',
+    tradeOffText: 'Tip: Collect glowing crystals outside and use Rover or Radio!',
+    initialAir: 84,
+    initialFood: 80,
+    initialHealth: 92,
+    initialDust: 20,
+    initialPower: { lifesupport: 2, greenhouse: 2, shield: 2, science: 2 },
+    stormDay: 3,
+    dustDay: 2,
+    requiredSamples: 2,
+    requiredScience: 4,
+  },
+];
 
 export interface DilemmaChoice {
   id: string;
@@ -234,147 +358,257 @@ export interface MissionDilemma {
 export const MISSION_DILEMMAS: MissionDilemma[] = [
   {
     id: 'solar-flare-storm',
-    title: 'Solar Flare Storm Warning',
+    title: 'Solar Flare Alert!',
     category: 'Solar Storm',
-    story:
-      'NASA DONKI space-weather sensors spotted a bright flare on the Sun! High-speed radiation particles will sweep past your outpost over the next few hours.',
-    nasaScienceNote:
-      'Real NASA RadLab & Curiosity RAD sensors show solar storms can push radiation above 4.0 mSv/day — 600x higher than on Earth!',
+    story: 'NASA satellites spotted a big Sun flare heading your way!',
+    nasaScienceNote: 'Water walls and storm shields block harmful solar rays.',
     choices: [
       {
-        id: 'shelter',
-        label: 'Close Storm Shutters & Shelter Crew',
-        gainText: '+25% Radiation Protection today',
-        costText: '-1 Power Cell tomorrow & -1 Science',
-        effects: { shieldBonus: 25, nextDayPowerMod: -1, science: -1, crewHealth: 4 },
-        lessonFeedback:
-          'Smart safety trade-off! You paused outdoor science and spent battery reserves, keeping your astronauts safe from radiation.',
+        id: 'pump-water-wall',
+        label: 'Fill Water Shield Wall',
+        gainText: 'Strong Radiation Protection today',
+        costText: '-8% Air & Water',
+        effects: { lifeSupport: -8, crewHealth: 6, shieldBonus: 30 },
+        lessonFeedback: 'Smart! Water walls blocked the storm rays.',
       },
       {
-        id: 'push-science',
-        label: 'Keep Rover Drilling Through the Flare',
-        gainText: '+2 Science Samples collected',
-        costText: '-18% Crew Health from radiation exposure',
-        effects: { science: 2, crewHealth: -18 },
-        lessonFeedback:
-          'You captured valuable crater data, but without storm shelter protection the radiation took a toll on crew health.',
+        id: 'keep-water-work',
+        label: 'Save Water & Keep Working',
+        gainText: '+1 Science Point',
+        costText: '-10% Health from rays',
+        effects: { crewHealth: -10, science: 1 },
+        lessonFeedback: 'You got Science data, but the rays tired the crew.',
       },
     ],
   },
   {
-    id: 'greenhouse-leak',
-    title: 'Greenhouse Pipe Leak & Radio Delay',
-    category: 'Comms Delay',
-    story:
-      'A coolant pipe inside the Hydroponics Greenhouse started dripping! On Mars, asking Earth for repair steps takes 24 minutes round-trip. Even on the Moon, gearing up takes time.',
-    nasaScienceNote:
-      'At light speed, Mars messages take 4–22 minutes each way. Astronauts must be trained to solve urgent problems without waiting for Earth!',
-    choices: [
-      {
-        id: 'fix-eva',
-        label: 'Send Crew to Patch It Right Away',
-        gainText: 'Saves Greenhouse Water & +8% Food',
-        costText: '-14% Oxygen & Water during airlock cycle',
-        effects: { food: 8, lifeSupport: -14 },
-        lessonFeedback:
-          'Quick thinking! Opening the airlock used extra oxygen, but patching the pipe fast saved your plants.',
-      },
-      {
-        id: 'wait-earth',
-        label: 'Wait for Earth Mission Control Checklist',
-        gainText: 'Saves -10% Oxygen (no airlock cycle)',
-        costText: '-16% Food lost while pipe leaks',
-        effects: { lifeSupport: 4, food: -16 },
-        lessonFeedback:
-          'You conserved airlock oxygen, but waiting through the radio delay let the greenhouse lose water and wilt some crops.',
-      },
-    ],
-  },
-  {
-    id: 'osdr-exercise-nutrition',
-    title: 'Low-Gravity Bone & Muscle Checkup',
-    category: 'Astronaut Health',
-    story:
-      'Your crew’s weekly medical scan shows their muscles are getting tired in low gravity. Fresh greens and powered exercise gear help, or they can work extra shifts instead.',
-    nasaScienceNote:
-      'NASA OSDR studies (OSD-48 & OSD-102) show astronauts need daily exercise and fresh plant nutrients to protect bones and immune cells.',
-    choices: [
-      {
-        id: 'exercise-greens',
-        label: 'Run Exercise Bikes & Serve Fresh Salad',
-        gainText: '+14% Crew Health boost',
-        costText: '-12% Food & -1 Power Cell tomorrow',
-        effects: { crewHealth: 14, food: -12, nextDayPowerMod: -1 },
-        lessonFeedback:
-          'Following NASA OSDR biology research kept your crew strong and sharp, even though it cost extra food and electricity.',
-      },
-      {
-        id: 'overtime-ration',
-        label: 'Ration Meals & Run Extra Rover Scans',
-        gainText: '+2 Science Samples & saves Food',
-        costText: '-12% Crew Health from fatigue',
-        effects: { science: 2, crewHealth: -12 },
-        lessonFeedback:
-          'Your science log grew fast, but skipping fresh nutrition and exercise made the astronauts tired and weaker.',
-      },
-    ],
-  },
-  {
-    id: 'dust-or-shadow-power',
-    title: 'Dust Buildup on Solar Wings',
+    id: 'dusty-solar-array',
+    title: 'Dust on Solar Panels',
     category: 'Weather & Power',
-    story:
-      'Fine regolith dust has coated your solar panels, cutting charging efficiency! Cleaning them restores full electricity, or you can route power carefully and conserve.',
-    nasaScienceNote:
-      'Real Mars rovers like Opportunity and InSight lost power when fine Martian dust covered their solar arrays; static-charged Moon dust sticks just as stubbornly!',
+    story: 'Dust lowered today’s solar battery power!',
+    nasaScienceNote: 'Dust blocks sunlight on Mars solar arrays.',
     choices: [
       {
-        id: 'clean-panels',
-        label: 'Use Air-Jet Brushes & Crew Cleaning',
-        gainText: '+1 Bonus Power Cell tomorrow',
-        costText: '-12% Life Support air & -8% Crew Health',
-        effects: { nextDayPowerMod: 1, lifeSupport: -12, crewHealth: -8 },
-        lessonFeedback:
-          'Clean panels mean big power tomorrow, though using pressurized gas and outside work tired the crew and used air.',
+        id: 'eva-brush-clean',
+        label: 'Brush Panels Clean',
+        gainText: '+1 Power Cell tomorrow',
+        costText: '-7% Air · -5% Health',
+        effects: { lifeSupport: -7, crewHealth: -5, nextDayPowerMod: 1 },
+        lessonFeedback: 'Clean panels make extra power for tomorrow!',
       },
       {
-        id: 'battery-save',
-        label: 'Dim Cabin Lights & Power-Save Mode',
-        gainText: '+8% Life Support stability',
+        id: 'stay-indoors-save',
+        label: 'Rest Indoors Today',
+        gainText: '+5% Crew Health',
         costText: '-1 Power Cell tomorrow',
-        effects: { lifeSupport: 8, nextDayPowerMod: -1 },
-        lessonFeedback:
-          'Smart conservation protected your oxygen tanks, though tomorrow you will need to budget with one fewer Power Cell.',
+        effects: { crewHealth: 5, nextDayPowerMod: -1 },
+        lessonFeedback: 'Crew stayed safe, with a bit less power tomorrow.',
       },
     ],
   },
   {
-    id: 'deep-ice-discovery',
-    title: 'Subsurface Water Ice Discovery!',
-    category: 'Astronaut Health',
-    story:
-      'The Rover’s ground radar spotted frozen water ice just below a nearby crater floor! Drilling it takes big energy, or you can beam the map straight to Earth.',
-    nasaScienceNote:
-      'Finding water ice on the Moon and Mars is huge: water gives astronauts drinking water, breathable oxygen (via electrolysis), and rocket fuel!',
+    id: 'earth-radio-delay',
+    title: '12-Minute Radio Wait',
+    category: 'Comms Delay',
+    story: 'A heater beeped! Waiting for Earth’s reply takes 24 minutes.',
+    nasaScienceNote: 'Mars is so far away that radio waves take minutes to travel.',
     choices: [
       {
-        id: 'drill-ice',
-        label: 'Drill & Melt Ice into Life Support Tanks',
-        gainText: '+20% Oxygen & Water reserves',
-        costText: '-1 Power Cell tomorrow & -6% Crew Health',
-        effects: { lifeSupport: 20, nextDayPowerMod: -1, crewHealth: -6 },
-        lessonFeedback:
-          'Turning crater ice into real water and oxygen gave your outpost huge breathing room at the cost of heavy drill power.',
+        id: 'switch-backup-heat',
+        label: 'Turn On Backup Now',
+        gainText: '+6% Health & Safe Air',
+        costText: '-6% Food energy',
+        effects: { crewHealth: 6, food: -6 },
+        lessonFeedback: 'Fast thinking! Astronauts must solve urgent problems fast.',
       },
       {
-        id: 'beam-data',
-        label: 'Transmit Full Radar Map to NASA Earth',
-        gainText: '+2 Science Samples toward mission goal',
-        costText: '-8% Life Support (extra cooling power)',
-        effects: { science: 2, lifeSupport: -8 },
-        lessonFeedback:
-          'Earth scientists cheered the discovery! Beaming high-power radio data heated the electronics and used extra cooling water.',
+        id: 'wait-mission-control',
+        label: 'Wait for Earth Reply',
+        gainText: '+1 Science Log',
+        costText: '-8% Air & Water',
+        effects: { science: 1, lifeSupport: -8 },
+        lessonFeedback: 'Earth helped, though waiting cost a bit of cabin air.',
       },
     ],
+  },
+];
+
+export type AstronautId = 'maya' | 'leo' | 'zara';
+
+export interface AstronautProfile {
+  id: AstronautId;
+  name: string;
+  role: string;
+  suitColorHex: number;
+  suitColorCss: string;
+  emoji: string;
+  perkSummary: string;
+}
+
+export const ASTRONAUT_PROFILES: Record<AstronautId, AstronautProfile> = {
+  maya: {
+    id: 'maya',
+    name: 'Maya',
+    role: 'Air & Shield Helper',
+    suitColorHex: 0xea580c,
+    suitColorCss: '#f97316',
+    emoji: '👩‍🚀',
+    perkSummary: 'Gives +5% extra Air',
+  },
+  leo: {
+    id: 'leo',
+    name: 'Leo',
+    role: 'Space Farmer',
+    suitColorHex: 0x22c55e,
+    suitColorCss: '#22c55e',
+    emoji: '🧑‍🌾',
+    perkSummary: 'Grows +5% extra Food',
+  },
+  zara: {
+    id: 'zara',
+    name: 'Zara',
+    role: 'Solar & Rover Pro',
+    suitColorHex: 0x0ea5e9,
+    suitColorCss: '#38bdf8',
+    emoji: '👷‍♀️',
+    perkSummary: 'Saves Air on walks',
+  },
+};
+
+export interface IntroPopupItem {
+  id: string;
+  stageIndex: number;
+  minTimeSec: number;
+  maxTimeSec: number;
+  badge: string;
+  emoji: string;
+  headline: string;
+  kidExplanation: string;
+  tradeOffPreview: string;
+  nasaSource: string;
+  accentHex: string;
+}
+
+export const INTRO_LAUNCH_POPUPS: IntroPopupItem[] = [
+  {
+    id: 'liftoff',
+    stageIndex: 0,
+    minTimeSec: 0,
+    maxTimeSec: 4.5,
+    badge: 'PART 1 · BLAST OFF!',
+    emoji: '🚀',
+    headline: '3, 2, 1... Bye Earth!',
+    kidExplanation: 'Hold on tight! Our rocket is blasting off straight for Mars!',
+    tradeOffPreview: 'We can only pack what fits inside the ship.',
+    nasaSource: 'Earth Launch',
+    accentHex: '#38bdf8',
+  },
+  {
+    id: 'deep-space',
+    stageIndex: 1,
+    minTimeSec: 4.5,
+    maxTimeSec: 9.5,
+    badge: 'PART 2 · CRUISING TO MARS',
+    emoji: '🌌',
+    headline: 'Zooming Through Space!',
+    kidExplanation: 'Earth is far behind us now. We make our own air and food on the way!',
+    tradeOffPreview: 'No stores in space, so we take care of every drop of water.',
+    nasaSource: 'Deep Space',
+    accentHex: '#a78bfa',
+  },
+  {
+    id: 'landing-outpost',
+    stageIndex: 2,
+    minTimeSec: 9.5,
+    maxTimeSec: 15.0,
+    badge: 'PART 3 · TOUCHDOWN!',
+    emoji: '🔴',
+    headline: 'We Made It to Mars!',
+    kidExplanation: 'Touchdown on the red dust! Ready to run our new Mars base?',
+    tradeOffPreview: 'Beat each level to unlock the next challenge!',
+    nasaSource: 'Mars Base',
+    accentHex: '#10b981',
+  },
+];
+
+export interface FieldSampleNode {
+  id: string;
+  name: string;
+  emoji: string;
+  x: number;
+  z: number;
+  colorHex: number;
+  colorCss: string;
+  bonusText: string;
+  effects: {
+    lifeSupport?: number;
+    food?: number;
+    crewHealth?: number;
+    science?: number;
+    powerBonus?: number;
+  };
+  nasaFact: string;
+}
+
+export const FIELD_SAMPLES: FieldSampleNode[] = [
+  {
+    id: 'ice-core',
+    name: 'Frozen Water-Ice Crystal',
+    emoji: '🧊',
+    x: -10.5,
+    z: 3.8,
+    colorHex: 0x38bdf8,
+    colorCss: '#38bdf8',
+    bonusText: '+12% Air · +1 Science',
+    effects: { lifeSupport: 12, science: 1 },
+    nasaFact: 'Real ice hides under Mars dirt! Melted ice gives water and oxygen.',
+  },
+  {
+    id: 'sojourner-rtg-battery',
+    name: 'Spare Solar Battery',
+    emoji: '🔋',
+    x: -10.2,
+    z: -9.2,
+    colorHex: 0xfacc15,
+    colorCss: '#facc15',
+    bonusText: '+1 Power tomorrow · +1 Science',
+    effects: { powerBonus: 1, lifeSupport: 6, science: 1 },
+    nasaFact: 'Spare batteries keep the base warm when dust blocks the sun.',
+  },
+  {
+    id: 'ares-bio-seed-crate',
+    name: 'Space Seed Pod',
+    emoji: '🌱',
+    x: 11.4,
+    z: -2.4,
+    colorHex: 0x10b981,
+    colorCss: '#10b981',
+    bonusText: '+14% Food · +1 Science',
+    effects: { food: 14, science: 1 },
+    nasaFact: 'Tiny seed pods grow healthy greens fast in water trays!',
+  },
+  {
+    id: 'jezero-mudstone',
+    name: 'Ancient Lake Rock',
+    emoji: '🪨',
+    x: 9.8,
+    z: 5.4,
+    colorHex: 0xf97316,
+    colorCss: '#f97316',
+    bonusText: '+2 Science Points',
+    effects: { science: 2 },
+    nasaFact: 'Billions of years ago, Mars had real rivers and lakes!',
+  },
+  {
+    id: 'eds-superconductor-coil',
+    name: 'Shield Booster Crystal',
+    emoji: '🛡️',
+    x: -2.5,
+    z: -10.4,
+    colorHex: 0xa855f7,
+    colorCss: '#a855f7',
+    bonusText: '+10% Health · +1 Science',
+    effects: { crewHealth: 10, science: 1 },
+    nasaFact: 'Extra shield coils help block space rays during solar storms.',
   },
 ];

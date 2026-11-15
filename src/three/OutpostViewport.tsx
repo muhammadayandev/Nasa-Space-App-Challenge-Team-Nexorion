@@ -2,7 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { soundEngine } from '../audio/soundEngine';
 import {
+  ASTRONAUT_PROFILES,
+  AstronautId,
+  FIELD_SAMPLES,
   MODULE_SPECS,
   ModuleId,
   OutpostSiteId,
@@ -15,6 +19,8 @@ import { createProceduralTextures } from './textures';
 export interface ViewportSimSnapshot {
   site: OutpostSiteId;
   selectedModule: ModuleId;
+  activeAstronaut: AstronautId;
+  collectedSampleIds: string[];
   powerAllocation: Record<PowerSystemKey, number>;
   isSolarStorm: boolean;
   isDustStorm: boolean;
@@ -30,9 +36,13 @@ interface OutpostViewportProps {
   simSnapshot: ViewportSimSnapshot;
   introRunId: number;
   isIntroPlaying: boolean;
+  introPaused: boolean;
+  walkToTarget: { x: number; z: number; seq: number } | null;
+  onIntroProgress: (progress: number, timeSec: number) => void;
   onIntroFinished: () => void;
   onNearStationChange: (stationId: Exclude<ModuleId, 'overview'> | null) => void;
   onInteractStation: (stationId: Exclude<ModuleId, 'overview'>) => void;
+  onCollectSample: (sampleId: string) => void;
 }
 
 const _camTargetPos = new THREE.Vector3();
@@ -77,17 +87,25 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
   simSnapshot,
   introRunId,
   isIntroPlaying,
+  introPaused,
+  walkToTarget,
+  onIntroProgress,
   onIntroFinished,
   onNearStationChange,
   onInteractStation,
+  onCollectSample,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const simRef = useRef<ViewportSimSnapshot>(simSnapshot);
   const isIntroRef = useRef<boolean>(isIntroPlaying);
+  const introPausedRef = useRef<boolean>(introPaused);
   const introTimerRef = useRef<number>(0);
   const onNearRef = useRef(onNearStationChange);
   const onInteractRef = useRef(onInteractStation);
+  const onIntroProgressRef = useRef(onIntroProgress);
   const onIntroFinishedRef = useRef(onIntroFinished);
+  const onCollectSampleRef = useRef(onCollectSample);
+  const clickWalkTargetRef = useRef<{ x: number; z: number } | null>(null);
   const cameraAnimatingRef = useRef<boolean>(true);
   const prevPresetRef = useRef<ModuleId>('overview');
   const applySiteThemeRef = useRef<((site: OutpostSiteId) => void) | null>(null);
@@ -95,9 +113,6 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
 
   const [webglError, setWebglError] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<Exclude<ModuleId, 'overview'> | null>(null);
-  const [introCaption, setIntroCaption] = useState<string>(
-    'Launching from Earth with Commander Maya, Botanist Leo & Engineer Zara...'
-  );
 
   useEffect(() => {
     simRef.current = simSnapshot;
@@ -115,6 +130,16 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
   }, [isIntroPlaying]);
 
   useEffect(() => {
+    introPausedRef.current = introPaused;
+  }, [introPaused]);
+
+  useEffect(() => {
+    if (walkToTarget) {
+      clickWalkTargetRef.current = { x: walkToTarget.x, z: walkToTarget.z };
+    }
+  }, [walkToTarget]);
+
+  useEffect(() => {
     introTimerRef.current = 0;
   }, [introRunId]);
 
@@ -127,8 +152,16 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
   }, [onInteractStation]);
 
   useEffect(() => {
+    onIntroProgressRef.current = onIntroProgress;
+  }, [onIntroProgress]);
+
+  useEffect(() => {
     onIntroFinishedRef.current = onIntroFinished;
   }, [onIntroFinished]);
+
+  useEffect(() => {
+    onCollectSampleRef.current = onCollectSample;
+  }, [onCollectSample]);
 
   useEffect(() => {
     if (applySiteThemeRef.current) {
@@ -265,12 +298,12 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       roughness: 0.9,
       metalness: 0.04,
     });
-    const targetSphere = new THREE.Mesh(new THREE.SphereGeometry(4.2, 32, 24), targetSphereMat);
-    targetSphere.position.set(16, 4, -36);
+    const targetSphere = new THREE.Mesh(new THREE.SphereGeometry(6.2, 36, 28), targetSphereMat);
+    targetSphere.position.set(16, 2.8, -46);
     transitGroup.add(targetSphere);
 
     const transitShip = buildSpacecraft(textures, true);
-    transitShip.group.scale.setScalar(0.85);
+    transitShip.group.scale.setScalar(0.92);
     transitGroup.add(transitShip.group);
 
     // OUTPOST SURFACE WORLD
@@ -390,7 +423,15 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       Object.entries(handles.stationRings).forEach(([, ring]) => {
         ring.position.y = groundHeightAt(ring.position.x, ring.position.z, site) + 0.04;
       });
+      FIELD_SAMPLES.forEach((smp) => {
+        const node = handles.sampleNodes[smp.id];
+        if (node) {
+          node.position.set(smp.x, groundHeightAt(smp.x, smp.z, site), smp.z);
+        }
+      });
       handles.landingPadPos.y = groundHeightAt(handles.landingPadPos.x, handles.landingPadPos.z, site);
+      clickWalkTargetRef.current = null;
+      handles.walkTargetRing.visible = false;
       resetPlayerToSpawn(site);
 
       ROCK_SEEDS.forEach((rk, i) => {
@@ -453,15 +494,17 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
-    // Mouse Drag Look-Around in Follow Mode + Click Raycast
+    // Mouse Drag Look-Around in Follow Mode + Click Raycast (Stations OR Ground Walk)
     const raycaster = new THREE.Raycaster();
     raycaster.layers.set(1);
+    const groundRaycaster = new THREE.Raycaster();
     let isDraggingLook = false;
     let pointerDownXY = { x: 0, y: 0 };
     let prevDragXY = { x: 0, y: 0 };
     let lastHoverCheck = 0;
 
     const onPointerDown = (e: PointerEvent) => {
+      soundEngine.unlock();
       isDraggingLook = true;
       pointerDownXY = { x: e.clientX, y: e.clientY };
       prevDragXY = { x: e.clientX, y: e.clientY };
@@ -479,7 +522,28 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       const hits = raycaster.intersectObjects(handles.clickableProxies, false);
       if (hits.length > 0) {
         const modId = hits[0].object.userData.moduleId as Exclude<ModuleId, 'overview'> | undefined;
-        if (modId) onInteractRef.current(modId);
+        if (modId) {
+          onInteractRef.current(modId);
+          return;
+        }
+      }
+
+      // If not clicking a building proxy, allow Click-to-Walk on Martian/Lunar terrain!
+      groundRaycaster.setFromCamera(_mouseVec, camera);
+      const groundHits = groundRaycaster.intersectObject(terrainMesh, false);
+      if (groundHits.length > 0) {
+        const pt = groundHits[0].point;
+        const dist = Math.hypot(pt.x, pt.z);
+        let wx = pt.x;
+        let wz = pt.z;
+        if (dist > 21) {
+          wx = (wx / dist) * 21;
+          wz = (wz / dist) * 21;
+        }
+        clickWalkTargetRef.current = { x: wx, z: wz };
+        handles.walkTargetRing.position.set(wx, groundHeightAt(wx, wz, simRef.current.site) + 0.06, wz);
+        handles.walkTargetRing.visible = true;
+        soundEngine.playClick(460);
       }
     };
 
@@ -538,7 +602,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     let disposed = false;
     let stormStrength = 0;
     let shutterProgress = 0;
-    let lastCaptionStage = -1;
+    let stepAudioTimer = 0;
 
     function afterDraw(cb: () => void) {
       const gl = renderer.getContext() as WebGL2RenderingContext;
@@ -566,57 +630,52 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       const elapsed = clock.getElapsedTime();
       const s = simRef.current;
 
+      // Sync active playable astronaut suit color in real time!
+      const astroProfile = ASTRONAUT_PROFILES[s.activeAstronaut] || ASTRONAUT_PROFILES.maya;
+      handles.playerAstro.suitAccentMat.color.setHex(astroProfile.suitColorHex);
+      (handles.playerMarker.material as THREE.MeshBasicMaterial).color.setHex(astroProfile.suitColorHex);
+
       // ---------------------------------------------------------
-      // EARTH-TO-OUTPOST ANIMATION SEQUENCE
+      // EARTH-TO-MARS DIRECT ROCKET JOURNEY (13.5s Lightweight Sequence)
       // ---------------------------------------------------------
       if (isIntroRef.current) {
-        introTimerRef.current += delta;
+        if (!introPausedRef.current) {
+          introTimerRef.current += delta;
+        }
         const t = introTimerRef.current;
+        const totalIntroSec = 13.5;
+        const totalProg = THREE.MathUtils.clamp(t / totalIntroSec, 0, 1);
+        onIntroProgressRef.current(totalProg, t);
 
-        if (t < 5.0) {
+        if (t < 9.5) {
           transitGroup.visible = true;
           surfaceGroup.visible = false;
           scene.background = new THREE.Color(0x040711);
-          scene.fog = new THREE.FogExp2(0x040711, 0.004);
+          scene.fog = new THREE.FogExp2(0x040711, 0.003);
           controls.enabled = false;
 
-          earthMesh.rotation.y += delta * 0.18;
-          const p = THREE.MathUtils.clamp(t / 5.0, 0, 1);
+          earthMesh.rotation.y += delta * 0.2;
+          targetSphere.rotation.y += delta * 0.24;
 
-          transitShip.group.position.set(
-            THREE.MathUtils.lerp(-5.2, 11.5, p),
-            THREE.MathUtils.lerp(2.2, 3.6, p),
-            THREE.MathUtils.lerp(-5.5, -24.5, p)
-          );
-          transitShip.group.rotation.set(0.35, -0.58, -0.68);
+          const p = THREE.MathUtils.clamp(t / 9.5, 0, 1);
 
-          const flamePulse = 0.85 + Math.sin(elapsed * 28) * 0.25;
-          transitShip.thrusterFlame.scale.set(1, flamePulse, 1);
-          (transitShip.thrusterFlame.material as THREE.MeshBasicMaterial).opacity = 0.9;
+          // Direct smooth arc from Earth straight to Mars/Base
+          const shipX = THREE.MathUtils.lerp(-5.0, 12.5, p);
+          const shipY = THREE.MathUtils.lerp(2.0, 3.4, p) + Math.sin(p * Math.PI) * 2.0;
+          const shipZ = THREE.MathUtils.lerp(-5.5, -39.0, p);
+          transitShip.group.position.set(shipX, shipY, shipZ);
+          transitShip.group.rotation.set(0.32, -0.52, -0.66);
 
-          camera.position.set(
-            transitShip.group.position.x + 6.5 - p * 2.5,
-            transitShip.group.position.y + 3.0,
-            transitShip.group.position.z + 9.0
-          );
-          camera.lookAt(
-            THREE.MathUtils.lerp(earthMesh.position.x + 4, targetSphere.position.x, p),
-            2.6,
-            THREE.MathUtils.lerp(earthMesh.position.z + 2, targetSphere.position.z + 8, p)
-          );
+          const flamePulse = 0.9 + Math.sin(elapsed * 28) * 0.25;
+          transitShip.thrusterFlame.scale.set(1.15, flamePulse * 1.3, 1.15);
+          (transitShip.thrusterFlame.material as THREE.MeshBasicMaterial).opacity = 0.92;
 
-          const stage = t < 2.3 ? 0 : 1;
-          if (stage !== lastCaptionStage) {
-            lastCaptionStage = stage;
-            setIntroCaption(
-              stage === 0
-                ? 'Blasting off from Earth! Commander Maya, Leo & Zara begin their mission.'
-                : s.site === 'moon'
-                ? 'Cruising 384,000 km across space toward the Moon’s South Pole...'
-                : 'Cruising across deep space toward Jezero Crater on Mars...'
-            );
-          }
-        } else if (t < 8.6) {
+          camera.position.set(shipX + 5.6 - p * 1.4, shipY + 2.4, shipZ + 8.6);
+
+          const lookX = THREE.MathUtils.lerp(earthMesh.position.x + 4, targetSphere.position.x, p);
+          const lookZ = THREE.MathUtils.lerp(earthMesh.position.z + 2, targetSphere.position.z + 4, p);
+          camera.lookAt(lookX, 2.8, lookZ);
+        } else if (t < totalIntroSec) {
           transitGroup.visible = false;
           surfaceGroup.visible = true;
           const skyHex = s.site === 'moon' ? 0x060913 : 0x28130e;
@@ -624,7 +683,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
           scene.fog = new THREE.FogExp2(skyHex, s.site === 'moon' ? 0.013 : 0.016);
           controls.enabled = false;
 
-          const landT = THREE.MathUtils.clamp((t - 5.0) / 2.0, 0, 1);
+          const landT = THREE.MathUtils.clamp((t - 9.5) / 2.0, 0, 1);
           const easeOut = 1 - Math.pow(1 - landT, 3);
           const padY = handles.landingPadPos.y + 0.25;
 
@@ -638,7 +697,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
           handles.landedShip.thrusterFlame.scale.setScalar(0.8 + Math.sin(elapsed * 30) * 0.15);
 
           // Astronauts walk from landing pad to starting positions
-          const walkT = THREE.MathUtils.clamp((t - 6.8) / 1.8, 0, 1);
+          const walkT = THREE.MathUtils.clamp((t - 11.4) / 2.0, 0, 1);
           const allArrivalAstros = [handles.playerAstro, ...handles.npcAstronauts];
           allArrivalAstros.forEach((astro, idx) => {
             const startX = handles.landingPadPos.x - 1.2 + idx * 0.7;
@@ -654,8 +713,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
             astro.rightArm.rotation.x = swing * 0.7;
           });
 
-          // Camera sweeps smoothly behind Commander Maya at the end of landing!
-          const camBlend = THREE.MathUtils.smoothstep(t, 6.8, 8.6);
+          const camBlend = THREE.MathUtils.smoothstep(t, 11.4, totalIntroSec);
           const pPos = handles.playerAstro.group.position;
           const behindX = pPos.x + Math.sin(chaseYaw) * Math.cos(chasePitch) * chaseDistance;
           const behindY = pPos.y + 1.5 + Math.sin(chasePitch) * chaseDistance;
@@ -672,16 +730,6 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
             THREE.MathUtils.lerp(handles.landingPadPos.z + 1, pPos.z, camBlend)
           );
           camera.lookAt(_camTargetLook);
-
-          const stage = t < 6.9 ? 2 : 3;
-          if (stage !== lastCaptionStage) {
-            lastCaptionStage = stage;
-            setIntroCaption(
-              stage === 2
-                ? `Touching down at ${s.site === 'moon' ? 'Shackleton Crater' : 'Jezero Crater'}!`
-                : 'Team arrived! Stepping behind Commander Maya — use WASD or Arrow keys to explore!'
-            );
-          }
         } else {
           isIntroRef.current = false;
           transitGroup.visible = false;
@@ -709,7 +757,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
         );
         (handles.landedShip.thrusterFlame.material as THREE.MeshBasicMaterial).opacity = 0;
 
-        // 1. Move Playable Player (Commander Maya) with WASD / Arrow Keys
+        // 1. Move Playable Player via WASD/Arrows OR Click-on-Terrain / Quick-Walk target!
         let moveForward = 0;
         let moveRight = 0;
         if (pressedKeys['KeyW'] || pressedKeys['ArrowUp']) moveForward += 1;
@@ -718,20 +766,43 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
         if (pressedKeys['KeyA'] || pressedKeys['ArrowLeft']) moveRight -= 1;
 
         const player = handles.playerAstro;
+        let dirX = 0;
+        let dirZ = 0;
+        let isMoving = false;
+
         if (moveForward !== 0 || moveRight !== 0) {
-          // Direction relative to chase camera yaw
+          clickWalkTargetRef.current = null;
+          handles.walkTargetRing.visible = false;
+
           const forwardX = -Math.sin(chaseYaw);
           const forwardZ = -Math.cos(chaseYaw);
           const rightX = Math.cos(chaseYaw);
           const rightZ = -Math.sin(chaseYaw);
 
-          let dirX = forwardX * moveForward + rightX * moveRight;
-          let dirZ = forwardZ * moveForward + rightZ * moveRight;
+          dirX = forwardX * moveForward + rightX * moveRight;
+          dirZ = forwardZ * moveForward + rightZ * moveRight;
           const len = Math.hypot(dirX, dirZ) || 1;
           dirX /= len;
           dirZ /= len;
+          isMoving = true;
+        } else if (clickWalkTargetRef.current) {
+          const tx = clickWalkTargetRef.current.x;
+          const tz = clickWalkTargetRef.current.z;
+          const dx = tx - player.group.position.x;
+          const dz = tz - player.group.position.z;
+          const distToTarget = Math.hypot(dx, dz);
+          if (distToTarget > 0.35) {
+            dirX = dx / distToTarget;
+            dirZ = dz / distToTarget;
+            isMoving = true;
+          } else {
+            clickWalkTargetRef.current = null;
+            handles.walkTargetRing.visible = false;
+          }
+        }
 
-          const speed = s.walkSpeed === 'fast' ? 6.4 : 4.2;
+        if (isMoving) {
+          const speed = s.walkSpeed === 'fast' ? 6.6 : 4.5;
           let nextX = player.group.position.x + dirX * speed * delta;
           let nextZ = player.group.position.z + dirZ * speed * delta;
 
@@ -756,7 +827,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
           player.group.position.x = nextX;
           player.group.position.z = nextZ;
 
-          // Smoothly rotate Maya to face walking direction
+          // Smoothly rotate astronaut to face walking direction
           const targetYaw = Math.atan2(dirX, dirZ);
           let diff = targetYaw - playerYaw;
           while (diff > Math.PI) diff -= Math.PI * 2;
@@ -769,6 +840,12 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
           player.rightLeg.rotation.x = -walkSwing;
           player.leftArm.rotation.x = -walkSwing * 0.75;
           player.rightArm.rotation.x = walkSwing * 0.75;
+
+          stepAudioTimer += delta;
+          if (stepAudioTimer > 0.36) {
+            stepAudioTimer = 0;
+            soundEngine.playFootstep();
+          }
         } else {
           player.leftLeg.rotation.x = THREE.MathUtils.damp(player.leftLeg.rotation.x, 0, 10, delta);
           player.rightLeg.rotation.x = THREE.MathUtils.damp(player.rightLeg.rotation.x, 0, 10, delta);
@@ -781,6 +858,26 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
           player.group.position.z,
           s.site
         );
+
+        // Animate & check proximity to Collectible 3D Field Samples
+        FIELD_SAMPLES.forEach((smp) => {
+          const node = handles.sampleNodes[smp.id];
+          if (!node) return;
+          const alreadyCollected = s.collectedSampleIds.includes(smp.id);
+          node.visible = !alreadyCollected;
+          if (!alreadyCollected) {
+            node.children.forEach((ch) => {
+              if (ch.userData.isCrystal) {
+                ch.rotation.y += delta * 2.2;
+                ch.position.y = 0.85 + Math.sin(elapsed * 3.5 + smp.x) * 0.16;
+              }
+            });
+            const dSample = Math.hypot(player.group.position.x - smp.x, player.group.position.z - smp.z);
+            if (dSample < 1.85) {
+              onCollectSampleRef.current(smp.id);
+            }
+          }
+        });
 
         // 2. Proximity Detection to Outpost Stations & NPC Crew
         let foundNear: Exclude<ModuleId, 'overview'> | null = null;
@@ -1021,24 +1118,6 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
         className="w-full h-full"
         aria-label="Interactive 3D Lunar and Martian Outpost Viewport"
       />
-
-      {isIntroPlaying && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-8 z-30 flex justify-center px-4">
-          <div className="pointer-events-auto flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-700 bg-[#0B1120]/95 px-5 py-3.5 shadow-2xl max-w-2xl w-full">
-            <div>
-              <p className="text-xs font-semibold text-sky-400">Earth Departure & Landing</p>
-              <p className="mt-0.5 font-display text-sm font-bold text-white">{introCaption}</p>
-            </div>
-            <button
-              type="button"
-              onClick={onIntroFinished}
-              className="rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 transition-colors whitespace-nowrap shrink-0"
-            >
-              Skip Intro
-            </button>
-          </div>
-        </div>
-      )}
 
       {!isIntroPlaying && hoveredId && (
         <div className="pointer-events-none fixed left-1/2 top-20 z-10 -translate-x-1/2 rounded-xl border border-sky-500/50 bg-[#0B1120]/95 px-3.5 py-1.5 text-xs font-semibold text-sky-200 shadow-lg">

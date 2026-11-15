@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Gem, Sparkles } from 'lucide-react';
 import { soundEngine } from './audio/soundEngine';
-import { BottomControlDock } from './components/BottomControlDock';
 import { DecisionModal } from './components/DecisionModal';
-import { GuideModal } from './components/GuideModal';
+import { GameMenuModal } from './components/GameMenuModal';
+import { IntroLaunchOverlay } from './components/IntroLaunchOverlay';
+import { LevelBriefModal } from './components/LevelBriefModal';
 import { MissionDebriefModal } from './components/MissionDebriefModal';
 import { NasaDataModal } from './components/NasaDataModal';
-import { SettingsModal } from './components/SettingsModal';
 import { StationInteractModal } from './components/StationInteractModal';
 import { TopTelemetryBar } from './components/TopTelemetryBar';
 import {
@@ -17,7 +18,12 @@ import {
   RADLAB_BENCHMARKS,
 } from './data/nasaData';
 import {
+  ASTRONAUT_PROFILES,
+  AstronautId,
   DilemmaChoice,
+  FIELD_SAMPLES,
+  GAME_LEVELS,
+  INTRO_LAUNCH_POPUPS,
   MISSION_DILEMMAS,
   MissionDilemma,
   MODULE_SPECS,
@@ -29,15 +35,7 @@ import {
 } from './data/missionScenarios';
 import { OutpostViewport, ViewportSimSnapshot } from './three/OutpostViewport';
 
-const MAX_DAYS = 7;
-const SCIENCE_GOAL = 8;
-
-const INITIAL_POWER: Record<PowerSystemKey, number> = {
-  lifesupport: 2,
-  greenhouse: 2,
-  shield: 2,
-  science: 2,
-};
+const PROGRESS_STORAGE_KEY = 'starbase_junior_progress_v1';
 
 function clampPercent(v: number): number {
   return Math.max(0, Math.min(100, v));
@@ -63,39 +61,85 @@ function rebalancePower(
   return next;
 }
 
+interface SavedProgress {
+  unlockedLevel: number;
+  completedLevels: number[];
+}
+
+function loadSavedProgress(): SavedProgress {
+  try {
+    const raw = localStorage.getItem(PROGRESS_STORAGE_KEY);
+    if (!raw) return { unlockedLevel: 1, completedLevels: [] };
+    const parsed = JSON.parse(raw) as Partial<SavedProgress>;
+    return {
+      unlockedLevel: Math.max(1, Math.min(GAME_LEVELS.length, parsed.unlockedLevel ?? 1)),
+      completedLevels: Array.isArray(parsed.completedLevels) ? parsed.completedLevels : [],
+    };
+  } catch {
+    return { unlockedLevel: 1, completedLevels: [] };
+  }
+}
+
 export default function App() {
-  const [site, setSite] = useState<OutpostSiteId>('moon');
+  const saved = useMemo(() => loadSavedProgress(), []);
+  const [unlockedLevel, setUnlockedLevel] = useState<number>(saved.unlockedLevel);
+  const [completedLevels, setCompletedLevels] = useState<number[]>(saved.completedLevels);
+  const [currentLevelId, setCurrentLevelId] = useState<number>(1);
+  const currentLevel = useMemo(
+    () => GAME_LEVELS.find((l) => l.id === currentLevelId) ?? GAME_LEVELS[0],
+    [currentLevelId]
+  );
+
+  const [site, setSite] = useState<OutpostSiteId>('mars');
+  const [activeAstronaut, setActiveAstronaut] = useState<AstronautId>('maya');
+
+  // Always start with the short animated rocket-to-Mars intro!
   const [introRunId, setIntroRunId] = useState<number>(1);
   const [isIntroPlaying, setIsIntroPlaying] = useState<boolean>(true);
+  const [introProgress, setIntroProgress] = useState<number>(0);
+  const [introTimeSec, setIntroTimeSec] = useState<number>(0);
+  const [introPaused, setIntroPaused] = useState<boolean>(false);
+  const [audioLocked, setAudioLocked] = useState<boolean>(() => soundEngine.isSuspended());
+  const lastIntroPopupIdRef = useRef<string | null>(null);
+
+  const [showLevelBrief, setShowLevelBrief] = useState<boolean>(true);
+  const [showMenuModal, setShowMenuModal] = useState<boolean>(false);
+  const [showNasaModal, setShowNasaModal] = useState<boolean>(false);
 
   const [day, setDay] = useState<number>(1);
-  const [lifeSupport, setLifeSupport] = useState<number>(84);
-  const [food, setFood] = useState<number>(78);
-  const [crewHealth, setCrewHealth] = useState<number>(92);
+  const [lifeSupport, setLifeSupport] = useState<number>(currentLevel.initialAir);
+  const [food, setFood] = useState<number>(currentLevel.initialFood);
+  const [crewHealth, setCrewHealth] = useState<number>(currentLevel.initialHealth);
   const [science, setScience] = useState<number>(0);
-  const [solarDust, setSolarDust] = useState<number>(20);
+  const [solarDust, setSolarDust] = useState<number>(currentLevel.initialDust);
+  const [actionsDone, setActionsDone] = useState<string[]>([]);
 
-  const [basePowerCells, setBasePowerCells] = useState<number>(8);
+  const [collectedSampleIds, setCollectedSampleIds] = useState<string[]>([]);
+  const [sampleToast, setSampleToast] = useState<{
+    title: string;
+    body: string;
+    color: string;
+  } | null>(null);
+  const [walkToTarget, setWalkToTarget] = useState<{
+    x: number;
+    z: number;
+    seq: number;
+  } | null>(null);
+
+  const [basePowerCells, setBasePowerCells] = useState<number>(SITE_CONFIGS.mars.maxSolarCells);
   const [nextDayPowerMod, setNextDayPowerMod] = useState<number>(0);
   const [shieldBonusToday, setShieldBonusToday] = useState<number>(0);
-  const [powerAllocation, setPowerAllocation] =
-    useState<Record<PowerSystemKey, number>>(INITIAL_POWER);
-
-  // Player Camera, Controls & Proximity State
-  const [cameraMode, setCameraMode] = useState<'follow' | 'overview'>('follow');
-  const [walkSpeed, setWalkSpeed] = useState<'normal' | 'fast'>('normal');
-  const [showBottomDock, setShowBottomDock] = useState<boolean>(false);
-  const [dockCollapsed, setDockCollapsed] = useState<boolean>(false);
-  const [autoOpenOnApproach, setAutoOpenOnApproach] = useState<boolean>(false);
-  const [selectedModule, setSelectedModule] = useState<ModuleId>('overview');
+  const [powerAllocation, setPowerAllocation] = useState<Record<PowerSystemKey, number>>(
+    currentLevel.initialPower
+  );
 
   const [nearStationId, setNearStationId] = useState<Exclude<ModuleId, 'overview'> | null>(null);
   const [activeStationModal, setActiveStationModal] = useState<Exclude<ModuleId, 'overview'> | null>(
     null
   );
-  const prevNearRef = useRef<Exclude<ModuleId, 'overview'> | null>(null);
 
   const [muted, setMuted] = useState<boolean>(false);
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
   const [isSolarStorm, setIsSolarStorm] = useState<boolean>(false);
   const [isDustStorm, setIsDustStorm] = useState<boolean>(false);
 
@@ -103,14 +147,7 @@ export default function App() {
   const [usedDilemmaIds, setUsedDilemmaIds] = useState<string[]>([]);
   const [missionOutcome, setMissionOutcome] = useState<'victory' | 'failed' | null>(null);
   const [failureReason, setFailureReason] = useState<string | null>(null);
-
-  const [statusMessage, setStatusMessage] = useState<string>(
-    'Use WASD or Arrow Keys to walk Commander Maya up to any outpost station and press E to interact!'
-  );
-
-  const [showNasaModal, setShowNasaModal] = useState<boolean>(false);
-  const [showGuideModal, setShowGuideModal] = useState<boolean>(false);
-  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [unlockedNewLevel, setUnlockedNewLevel] = useState<boolean>(false);
 
   const [nasaSnapshot, setNasaSnapshot] = useState<NasaDatasetSnapshot>({
     sourceMode: 'archive',
@@ -131,33 +168,131 @@ export default function App() {
     };
   }, []);
 
-  // Keyboard shortcut 'H' toggles the optional bottom quick-control bar
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (
-        e.key.toLowerCase() === 'h' &&
-        !isIntroPlaying &&
-        !activeDilemma &&
-        !showNasaModal &&
-        !showGuideModal &&
-        !showSettingsModal &&
-        !activeStationModal
-      ) {
-        setShowBottomDock((prev) => !prev);
+    try {
+      localStorage.setItem(
+        PROGRESS_STORAGE_KEY,
+        JSON.stringify({ unlockedLevel, completedLevels })
+      );
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [unlockedLevel, completedLevels]);
+
+  const activeIntroPopup = useMemo(() => {
+    const match = INTRO_LAUNCH_POPUPS.find(
+      (p) => introTimeSec >= p.minTimeSec && introTimeSec < p.maxTimeSec
+    );
+    return match || INTRO_LAUNCH_POPUPS[INTRO_LAUNCH_POPUPS.length - 1];
+  }, [introTimeSec]);
+
+  const handleUnlockAudio = useCallback(() => {
+    soundEngine.unlock();
+    const stillLocked = soundEngine.isSuspended();
+    setAudioLocked(stillLocked);
+    if (!stillLocked && isIntroPlaying) {
+      soundEngine.playCountdownBeep(true);
+      soundEngine.startRocketRumble();
+      soundEngine.playPopupChime();
+      soundEngine.speak(`${activeIntroPopup.headline}. ${activeIntroPopup.kidExplanation}`);
+    }
+  }, [isIntroPlaying, activeIntroPopup]);
+
+  useEffect(() => {
+    if (!audioLocked) return;
+    const onFirstGesture = () => {
+      soundEngine.unlock();
+      const locked = soundEngine.isSuspended();
+      setAudioLocked(locked);
+      if (!locked && isIntroPlaying) {
+        soundEngine.startRocketRumble();
+        soundEngine.playPopupChime();
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [
-    isIntroPlaying,
-    activeDilemma,
-    showNasaModal,
-    showGuideModal,
-    showSettingsModal,
-    activeStationModal,
-  ]);
+    window.addEventListener('pointerdown', onFirstGesture, { passive: true });
+    window.addEventListener('keydown', onFirstGesture, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', onFirstGesture);
+      window.removeEventListener('keydown', onFirstGesture);
+    };
+  }, [audioLocked, isIntroPlaying]);
+
+  useEffect(() => {
+    if (!isIntroPlaying) {
+      soundEngine.stopRocketRumble();
+      lastIntroPopupIdRef.current = null;
+      return;
+    }
+    if (lastIntroPopupIdRef.current !== activeIntroPopup.id) {
+      lastIntroPopupIdRef.current = activeIntroPopup.id;
+      if (!soundEngine.isSuspended()) {
+        if (activeIntroPopup.stageIndex === 0) {
+          soundEngine.playCountdownBeep(true);
+          soundEngine.startRocketRumble();
+        } else {
+          soundEngine.playSpaceWhoosh();
+        }
+        soundEngine.playPopupChime();
+        soundEngine.speak(`${activeIntroPopup.headline}. ${activeIntroPopup.kidExplanation}`);
+      }
+    }
+  }, [isIntroPlaying, activeIntroPopup]);
+
+  const startLevel = useCallback(
+    (levelId: number, playIntro: boolean, overrideSite?: OutpostSiteId) => {
+      const lvl = GAME_LEVELS.find((l) => l.id === levelId) ?? GAME_LEVELS[0];
+      const targetSite = overrideSite ?? lvl.site;
+      soundEngine.playClick(560);
+      setCurrentLevelId(lvl.id);
+      setSite(targetSite);
+      setDay(1);
+      setLifeSupport(lvl.initialAir);
+      setFood(lvl.initialFood);
+      setCrewHealth(lvl.initialHealth);
+      setScience(0);
+      setSolarDust(lvl.initialDust);
+      setActionsDone([]);
+      setCollectedSampleIds([]);
+      setSampleToast(null);
+      setWalkToTarget(null);
+      const maxCells = SITE_CONFIGS[targetSite].maxSolarCells - (lvl.dustDay === 1 ? 2 : 0);
+      setBasePowerCells(maxCells);
+      setNextDayPowerMod(0);
+      setShieldBonusToday(0);
+      setPowerAllocation(rebalancePower(lvl.initialPower, maxCells));
+      setNearStationId(null);
+      setActiveStationModal(null);
+      setIsSolarStorm(lvl.stormDay === 1);
+      setIsDustStorm(lvl.dustDay === 1);
+      setActiveDilemma(null);
+      setUsedDilemmaIds([]);
+      setMissionOutcome(null);
+      setFailureReason(null);
+      setUnlockedNewLevel(false);
+      setShowMenuModal(false);
+      setShowLevelBrief(true);
+
+      if (playIntro) {
+        setIntroRunId((n) => n + 1);
+        setIntroProgress(0);
+        setIntroTimeSec(0);
+        setIntroPaused(false);
+        lastIntroPopupIdRef.current = null;
+        setIsIntroPlaying(true);
+      } else {
+        setIsIntroPlaying(false);
+      }
+    },
+    []
+  );
 
   const totalPowerCells = Math.max(4, Math.min(9, basePowerCells + nextDayPowerMod));
+  const usedPowerCells =
+    powerAllocation.lifesupport +
+    powerAllocation.greenhouse +
+    powerAllocation.shield +
+    powerAllocation.science;
+  const freePowerCells = Math.max(0, totalPowerCells - usedPowerCells);
 
   const effectiveRadiationMsv = useMemo(() => {
     const siteCfg = SITE_CONFIGS[site];
@@ -168,67 +303,101 @@ export default function App() {
     return Math.max(0.15, activeFlareDose - shieldReduction);
   }, [site, isSolarStorm, nasaSnapshot.flares, powerAllocation.shield, shieldBonusToday]);
 
-  const resetMission = useCallback((targetSite: OutpostSiteId) => {
-    soundEngine.playClick(520);
-    setSite(targetSite);
-    setIntroRunId((n) => n + 1);
-    setIsIntroPlaying(true);
-    setDay(1);
-    setLifeSupport(84);
-    setFood(78);
-    setCrewHealth(92);
-    setScience(0);
-    setSolarDust(20);
-    setBasePowerCells(SITE_CONFIGS[targetSite].maxSolarCells);
-    setNextDayPowerMod(0);
-    setShieldBonusToday(0);
-    setPowerAllocation(INITIAL_POWER);
-    setSelectedModule('overview');
-    setNearStationId(null);
-    setActiveStationModal(null);
-    setIsSolarStorm(false);
-    setIsDustStorm(false);
-    setActiveDilemma(null);
-    setUsedDilemmaIds([]);
-    setMissionOutcome(null);
-    setFailureReason(null);
-    const cfg = SITE_CONFIGS[targetSite];
-    setStatusMessage(
-      `Walk Commander Maya with WASD or Arrow keys toward any station at ${cfg.name} and press E!`
-    );
+  const levelGoalMet = useMemo(() => {
+    if (currentLevel.requiredMinAir !== undefined && lifeSupport < currentLevel.requiredMinAir) {
+      return false;
+    }
+    if (currentLevel.requiredMinFood !== undefined && food < currentLevel.requiredMinFood) {
+      return false;
+    }
+    if (
+      currentLevel.requiredActionId &&
+      !actionsDone.includes(currentLevel.requiredActionId)
+    ) {
+      return false;
+    }
+    if (currentLevel.requiredMaxDust !== undefined && solarDust > currentLevel.requiredMaxDust) {
+      return false;
+    }
+    if (
+      currentLevel.requiredMinShield !== undefined &&
+      powerAllocation.shield < currentLevel.requiredMinShield &&
+      shieldBonusToday <= 0
+    ) {
+      return false;
+    }
+    if (
+      currentLevel.requiredSamples !== undefined &&
+      collectedSampleIds.length < currentLevel.requiredSamples
+    ) {
+      return false;
+    }
+    if (currentLevel.requiredScience !== undefined && science < currentLevel.requiredScience) {
+      return false;
+    }
+    return true;
+  }, [
+    currentLevel,
+    lifeSupport,
+    food,
+    actionsDone,
+    solarDust,
+    powerAllocation.shield,
+    shieldBonusToday,
+    collectedSampleIds.length,
+    science,
+  ]);
+
+  const handleIntroProgress = useCallback((progress: number, timeSec: number) => {
+    setIntroProgress(progress);
+    setIntroTimeSec(timeSec);
   }, []);
 
   const handleIntroFinished = useCallback(() => {
+    soundEngine.stopRocketRumble();
     soundEngine.playSuccess();
+    setIntroPaused(false);
     setIsIntroPlaying(false);
   }, []);
 
-  const handleNearStationChange = useCallback(
-    (stationId: Exclude<ModuleId, 'overview'> | null) => {
-      setNearStationId(stationId);
-      if (
-        autoOpenOnApproach &&
-        stationId &&
-        prevNearRef.current !== stationId &&
-        !activeDilemma &&
-        !missionOutcome
-      ) {
-        soundEngine.playSelectModule();
-        setActiveStationModal(stationId);
+  const handleCollectSample = useCallback(
+    (sampleId: string) => {
+      if (collectedSampleIds.includes(sampleId)) return;
+      const node = FIELD_SAMPLES.find((s) => s.id === sampleId);
+      if (!node) return;
+      soundEngine.playSampleCollect();
+      setCollectedSampleIds((prev) => [...prev, sampleId]);
+
+      setLifeSupport((v) => clampPercent(v + (node.effects.lifeSupport ?? 0)));
+      setFood((v) => clampPercent(v + (node.effects.food ?? 0)));
+      setCrewHealth((v) => clampPercent(v + (node.effects.crewHealth ?? 0)));
+      setScience((v) => v + (node.effects.science ?? 0));
+      if (node.effects.powerBonus) {
+        setNextDayPowerMod((m) => Math.min(2, m + (node.effects.powerBonus ?? 0)));
       }
-      prevNearRef.current = stationId;
+
+      setSampleToast({
+        title: `${node.emoji} ${node.name} (${node.bonusText})`,
+        body: node.nasaFact,
+        color: node.colorCss,
+      });
     },
-    [autoOpenOnApproach, activeDilemma, missionOutcome]
+    [collectedSampleIds]
   );
+
+  useEffect(() => {
+    if (!sampleToast) return;
+    const t = setTimeout(() => setSampleToast(null), 4200);
+    return () => clearTimeout(t);
+  }, [sampleToast]);
 
   const handleInteractStation = useCallback(
     (stationId: Exclude<ModuleId, 'overview'>) => {
-      if (activeDilemma || missionOutcome) return;
+      if (activeDilemma || missionOutcome || showMenuModal || showLevelBrief) return;
       soundEngine.playSelectModule();
-      setSelectedModule(stationId);
       setActiveStationModal(stationId);
     },
-    [activeDilemma, missionOutcome]
+    [activeDilemma, missionOutcome, showMenuModal, showLevelBrief]
   );
 
   const handleSetPower = useCallback(
@@ -250,39 +419,60 @@ export default function App() {
   const handleStationAction = useCallback(
     (actionId: string) => {
       soundEngine.playClick(640);
+      setActionsDone((prev) => (prev.includes(actionId) ? prev : [...prev, actionId]));
+
       let nextLs = lifeSupport;
       let nextFood = food;
       let nextHealth = crewHealth;
       let nextSci = science;
 
+      const mayaBonus = activeAstronaut === 'maya' ? 5 : 0;
+      const leoBonus = activeAstronaut === 'leo' ? 5 : 0;
+      const zaraSave = activeAstronaut === 'zara' ? 4 : 0;
+
       if (actionId === 'clean-solar') {
         setSolarDust(0);
         setNextDayPowerMod((m) => Math.min(2, m + 1));
-        nextLs = clampPercent(lifeSupport - 8);
+        nextLs = clampPercent(lifeSupport - 8 + zaraSave);
         nextHealth = clampPercent(crewHealth - 5);
-        setStatusMessage('Solar panels brushed clean! +1 Power Cell restored (-8% Air & Water, -5% Crew).');
-      } else if (actionId === 'flush-filters') {
-        nextLs = clampPercent(lifeSupport + 12);
+      } else if (actionId === 'battery-boost') {
+        setSolarDust(Math.max(0, solarDust - 25));
+        setNextDayPowerMod((m) => Math.min(2, m + 1));
+        nextLs = clampPercent(lifeSupport - 6 + zaraSave);
         nextHealth = clampPercent(crewHealth - 7);
-        setStatusMessage('CO₂ scrubbers & water filters flushed! +12% Air & Water (-7% Crew effort).');
+      } else if (actionId === 'flush-filters') {
+        nextLs = clampPercent(lifeSupport + 12 + mayaBonus);
+        nextHealth = clampPercent(crewHealth - 7);
+      } else if (actionId === 'moxie-split') {
+        nextLs = clampPercent(lifeSupport + 10 + mayaBonus);
+        nextHealth = clampPercent(crewHealth - 4);
+        nextFood = clampPercent(food - 4);
       } else if (actionId === 'harvest-greens') {
-        nextFood = clampPercent(food + 12);
-        nextHealth = clampPercent(crewHealth + 5);
+        nextFood = clampPercent(food + 12 + leoBonus);
+        nextHealth = clampPercent(crewHealth + 5 + leoBonus);
         nextLs = clampPercent(lifeSupport - 9);
-        setStatusMessage('Harvested fresh space greens! +12% Food & +5% Crew Health (-9% Water).');
+      } else if (actionId === 'veggie-study') {
+        nextSci = science + 1;
+        nextFood = clampPercent(food + 6 + leoBonus);
+        nextLs = clampPercent(lifeSupport - 8);
       } else if (actionId === 'drill-sample') {
         nextSci = science + 1;
-        nextLs = clampPercent(lifeSupport - 9);
+        nextLs = clampPercent(lifeSupport - 9 + zaraSave);
         nextHealth = clampPercent(crewHealth - 6);
-        setStatusMessage('Rover drilled a new core sample! +1 Science (-9% Air & Water, -6% Crew).');
+      } else if (actionId === 'osdr-bio-scan') {
+        nextSci = science + 1;
+        nextHealth = clampPercent(crewHealth + 4);
+        nextFood = clampPercent(food - 7);
       } else if (actionId === 'beam-earth') {
         nextSci = science + 1;
         nextLs = clampPercent(lifeSupport - 10);
-        setStatusMessage('High-power radio packet sent to Earth! +1 Science (-10% cooling Water).');
       } else if (actionId === 'crew-snack') {
-        nextHealth = clampPercent(crewHealth + 10);
-        nextFood = clampPercent(food - 9);
-        setStatusMessage('Team shared fresh meal & checkup! +10% Crew Health (-9% Food).');
+        nextHealth = clampPercent(crewHealth + 12 + leoBonus);
+        nextFood = clampPercent(food - 8);
+      } else if (actionId === 'water-wall-shield') {
+        setShieldBonusToday((b) => Math.min(40, b + 25));
+        nextLs = clampPercent(lifeSupport - 8 + mayaBonus);
+        nextHealth = clampPercent(crewHealth + 6);
       }
 
       setLifeSupport(nextLs);
@@ -292,19 +482,19 @@ export default function App() {
       setActiveStationModal(null);
 
       if (nextLs <= 0 || nextFood <= 0 || nextHealth <= 0) {
-        setFailureReason('That outpost action drained a critical life-support or health reserve to 0%.');
+        setFailureReason('One of your bars reached 0%! Keep Air, Food, and Health above zero.');
         setMissionOutcome('failed');
       }
     },
-    [lifeSupport, food, crewHealth, science]
+    [lifeSupport, food, crewHealth, science, solarDust, activeAstronaut]
   );
 
   const handleAdvanceDay = useCallback(() => {
-    if (isIntroPlaying || missionOutcome || activeDilemma) return;
+    if (isIntroPlaying || missionOutcome || activeDilemma || showLevelBrief) return;
 
-    const lsDeltaMap = [-24, -10, 4, 12];
-    const ghFoodMap = [-18, -7, 7, 15];
-    const ghO2BonusMap = [0, 0, 4, 7];
+    const lsDeltaMap = [-22, -9, 4, 11];
+    const ghFoodMap = [-16, -6, 6, 13];
+    const ghO2BonusMap = [0, 0, 3, 6];
 
     const lsChange =
       lsDeltaMap[powerAllocation.lifesupport] +
@@ -328,38 +518,77 @@ export default function App() {
     setFood(nextFood);
     setCrewHealth(nextHealth);
     setScience(nextScience);
-    setShieldBonusToday(0);
 
     if (nextLs <= 0 || nextFood <= 0 || nextHealth <= 0) {
       soundEngine.playAdvanceSol(true);
-      let reason = 'Crew health dropped to a critical emergency level.';
-      if (nextLs <= 0) {
-        reason =
-          'Oxygen & water reserves ran dry because Life Support did not receive enough steady power.';
-      } else if (nextFood <= 0) {
-        reason =
-          'Food supplies ran out because the Hydroponics Greenhouse needed more power earlier.';
-      }
-      setFailureReason(reason);
+      setFailureReason(
+        nextLs <= 0
+          ? 'Air ran out! Give the Air Machine at least 2 Power Cells.'
+          : nextFood <= 0
+          ? 'Food ran out! Give Space Garden more Power or harvest crops.'
+          : 'Crew Health dropped to 0! Raise Shield power during storms.'
+      );
       setMissionOutcome('failed');
       return;
     }
 
-    if (day >= MAX_DAYS) {
-      soundEngine.playSuccess();
-      setMissionOutcome('victory');
+    // End of final level day -> check if level goal passed!
+    if (day >= currentLevel.maxDays) {
+      const passedAir =
+        currentLevel.requiredMinAir === undefined || nextLs >= currentLevel.requiredMinAir;
+      const passedFood =
+        currentLevel.requiredMinFood === undefined || nextFood >= currentLevel.requiredMinFood;
+      const passedAction =
+        !currentLevel.requiredActionId || actionsDone.includes(currentLevel.requiredActionId);
+      const passedDust =
+        currentLevel.requiredMaxDust === undefined || solarDust <= currentLevel.requiredMaxDust;
+      const passedShield =
+        currentLevel.requiredMinShield === undefined ||
+        powerAllocation.shield >= currentLevel.requiredMinShield ||
+        shieldBonusToday > 0;
+      const passedSamples =
+        currentLevel.requiredSamples === undefined ||
+        collectedSampleIds.length >= currentLevel.requiredSamples;
+      const passedSci =
+        currentLevel.requiredScience === undefined || nextScience >= currentLevel.requiredScience;
+
+      if (
+        passedAir &&
+        passedFood &&
+        passedAction &&
+        passedDust &&
+        passedShield &&
+        passedSamples &&
+        passedSci
+      ) {
+        soundEngine.playSuccess();
+        setCompletedLevels((prev) =>
+          prev.includes(currentLevel.id) ? prev : [...prev, currentLevel.id]
+        );
+        if (currentLevel.id >= unlockedLevel && currentLevel.id < GAME_LEVELS.length) {
+          setUnlockedLevel(currentLevel.id + 1);
+          setUnlockedNewLevel(true);
+        }
+        setMissionOutcome('victory');
+      } else {
+        soundEngine.playAdvanceSol(true);
+        setFailureReason(`Almost! Level Goal not finished yet: ${currentLevel.goalText}`);
+        setMissionOutcome('failed');
+      }
       return;
     }
 
+    // Advance to next day in current level
     const nextDay = day + 1;
     setDay(nextDay);
+    setShieldBonusToday(0);
 
-    const stormActive = nextDay === 3 || nextDay === 6;
-    const dustOrShadow = nextDay === 4 || nextDay === 5;
+    const stormActive = currentLevel.stormDay === nextDay;
+    const dustOrShadow = currentLevel.dustDay === nextDay;
     setIsSolarStorm(stormActive);
     setIsDustStorm(dustOrShadow);
 
-    const addedDust = dustOrShadow ? 35 : 15;
+    const addedDust = dustOrShadow ? 35 : 10;
     const nextDust = Math.min(100, solarDust + addedDust);
     setSolarDust(nextDust);
 
@@ -372,23 +601,8 @@ export default function App() {
 
     soundEngine.playAdvanceSol(stormActive);
 
-    const dayWord = SITE_CONFIGS[site].dayUnit;
-    setStatusMessage(
-      `${dayWord} ${nextDay}: ${
-        stormActive
-          ? 'NASA DONKI Solar Storm! Walk to the Habitat or raise Storm Shielding!'
-          : dustOrShadow
-          ? site === 'mars'
-            ? 'Martian dust dimmed solar panels! Walk to the Solar Grid to brush them clean.'
-            : 'Crater rim shadow cut sunlight — power cells reduced today!'
-          : `Collected +${scienceGain} Science · Air & Water ${
-              lsChange >= 0 ? `+${lsChange}` : lsChange
-            }% · Food ${foodChange >= 0 ? `+${foodChange}` : foodChange}%`
-      }`
-    );
-
     const available = MISSION_DILEMMAS.filter((d) => !usedDilemmaIds.includes(d.id));
-    if (available.length > 0 && nextDay >= 2 && nextDay <= 6) {
+    if (available.length > 0 && (stormActive || currentLevel.id >= 3)) {
       const picked = stormActive
         ? available.find((d) => d.id === 'solar-flare-storm') || available[0]
         : available[0];
@@ -399,6 +613,7 @@ export default function App() {
     isIntroPlaying,
     missionOutcome,
     activeDilemma,
+    showLevelBrief,
     powerAllocation,
     effectiveRadiationMsv,
     lifeSupport,
@@ -406,8 +621,13 @@ export default function App() {
     crewHealth,
     science,
     day,
-    site,
+    currentLevel,
+    actionsDone,
     solarDust,
+    shieldBonusToday,
+    collectedSampleIds.length,
+    site,
+    unlockedLevel,
     usedDilemmaIds,
   ]);
 
@@ -434,10 +654,8 @@ export default function App() {
       }
 
       setActiveDilemma(null);
-      setStatusMessage(choice.lessonFeedback);
-
       if (nextLs <= 0 || nextFood <= 0 || nextHealth <= 0) {
-        setFailureReason('That emergency decision pushed an outpost resource to 0%.');
+        setFailureReason('A resource bar hit 0%! Replay the level and try a safer trade-off.');
         setMissionOutcome('failed');
       }
     },
@@ -447,7 +665,8 @@ export default function App() {
   const viewportSnapshot: ViewportSimSnapshot = useMemo(
     () => ({
       site,
-      selectedModule,
+      activeAstronaut,
+      selectedModule: 'overview',
       powerAllocation,
       isSolarStorm,
       isDustStorm,
@@ -455,167 +674,203 @@ export default function App() {
       food,
       lifeSupport,
       shieldLevel: powerAllocation.shield,
-      cameraMode,
-      walkSpeed,
+      cameraMode: 'follow',
+      walkSpeed: 'normal',
+      collectedSampleIds,
     }),
     [
       site,
-      selectedModule,
+      activeAstronaut,
       powerAllocation,
       isSolarStorm,
       isDustStorm,
       crewHealth,
       food,
       lifeSupport,
-      cameraMode,
-      walkSpeed,
+      collectedSampleIds,
     ]
   );
 
   const nearPoint = nearStationId ? STATION_POINTS.find((p) => p.id === nearStationId) : null;
   const nearSpec = nearStationId ? MODULE_SPECS[nearStationId] : null;
+  const uncollectedSamples = FIELD_SAMPLES.filter((s) => !collectedSampleIds.includes(s.id));
 
   return (
-    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-[#070B14]">
+    <div className="relative h-screen w-screen overflow-hidden bg-[#070B14]">
+      <OutpostViewport
+        simSnapshot={viewportSnapshot}
+        introRunId={introRunId}
+        isIntroPlaying={isIntroPlaying}
+        introPaused={introPaused}
+        walkToTarget={walkToTarget}
+        onIntroProgress={handleIntroProgress}
+        onIntroFinished={handleIntroFinished}
+        onNearStationChange={setNearStationId}
+        onInteractStation={handleInteractStation}
+        onCollectSample={handleCollectSample}
+      />
+
+      {/* GTA-Style Top-Left Health/Air/Food/Rad/Power Bars & Top-Right Menu */}
       <TopTelemetryBar
+        level={currentLevel}
+        levelGoalMet={levelGoalMet}
         site={site}
-        onSwitchSite={(nextSite) => {
-          if (nextSite !== site) resetMission(nextSite);
-        }}
+        activeAstronaut={activeAstronaut}
         day={day}
-        maxDays={MAX_DAYS}
+        maxDays={currentLevel.maxDays}
         lifeSupport={lifeSupport}
         food={food}
         crewHealth={crewHealth}
-        science={science}
-        scienceGoal={SCIENCE_GOAL}
         radiationMsv={effectiveRadiationMsv}
+        powerFree={freePowerCells}
+        powerTotal={totalPowerCells}
         isSolarStorm={isSolarStorm}
         isDustStorm={isDustStorm}
         muted={muted}
-        onToggleMute={() => {
-          const next = !muted;
-          soundEngine.muted = next;
-          setMuted(next);
+        introPlaying={isIntroPlaying}
+        onOpenMenu={() => {
+          soundEngine.playClick(620);
+          setShowMenuModal(true);
         }}
+        onOpenCrewSwitch={() => handleInteractStation('crew')}
         onOpenNasaData={() => {
           soundEngine.playClick(620);
           setShowNasaModal(true);
         }}
-        onOpenGuide={() => {
-          soundEngine.playClick(620);
-          setShowGuideModal(true);
-        }}
-        onOpenSettings={() => {
-          soundEngine.playClick(620);
-          setShowSettingsModal(true);
+        onToggleMute={() => {
+          const next = !muted;
+          soundEngine.setMuted(next);
+          setMuted(next);
         }}
         onAdvanceDay={handleAdvanceDay}
-        onResetMission={() => resetMission(site)}
-        introPlaying={isIntroPlaying}
       />
 
-      <main className="relative flex-1 overflow-hidden">
-        <OutpostViewport
-          simSnapshot={viewportSnapshot}
-          introRunId={introRunId}
-          isIntroPlaying={isIntroPlaying}
-          onIntroFinished={handleIntroFinished}
-          onNearStationChange={handleNearStationChange}
-          onInteractStation={handleInteractStation}
+      {/* Animated Rocket-to-Mars Intro Overlay */}
+      {isIntroPlaying && (
+        <IntroLaunchOverlay
+          site={site}
+          progress={introProgress}
+          activePopup={activeIntroPopup}
+          paused={introPaused}
+          audioLocked={audioLocked}
+          onUnlockAudio={handleUnlockAudio}
+          onTogglePause={() => setIntroPaused((p) => !p)}
+          onSkipIntro={handleIntroFinished}
         />
+      )}
 
-        {/* Compact Top-Left Movement Hint & Top-Right Mission Log */}
-        {!isIntroPlaying && (
-          <>
-            <div className="pointer-events-none fixed left-4 top-20 z-10 rounded-xl border border-slate-700/90 bg-[#0B1120]/90 px-3.5 py-2 text-xs text-slate-200 shadow-lg">
-              <span className="font-semibold text-amber-400">Move:</span>{' '}
-              <span>WASD or Arrow Keys</span>
-              <span className="mx-1.5 text-slate-600">·</span>
-              <span className="font-semibold text-sky-400">Look:</span>{' '}
-              <span>Drag Mouse</span>
-            </div>
+      {/* Sample Crystal Toast */}
+      {!isIntroPlaying && sampleToast && (
+        <div
+          className="pointer-events-none fixed left-1/2 top-16 z-20 w-[90%] max-w-sm -translate-x-1/2 rounded-2xl border-2 bg-[#080E1B]/95 px-4 py-2.5 shadow-2xl backdrop-blur-md animate-[popupSlideUp_0.25s_ease-out]"
+          style={{ borderColor: sampleToast.color }}
+        >
+          <p className="flex items-center gap-1.5 font-display text-sm font-extrabold text-white">
+            <Sparkles className="h-4 w-4 text-amber-400" />
+            <span>{sampleToast.title}</span>
+          </p>
+          <p className="mt-0.5 text-xs text-slate-300">{sampleToast.body}</p>
+        </div>
+      )}
 
-            <div className="pointer-events-none fixed right-4 top-20 z-10 max-w-sm rounded-xl border border-slate-700/90 bg-[#0B1120]/90 px-3.5 py-2 text-xs text-slate-200 shadow-lg">
-              <span className="font-semibold text-sky-400">Mission Log · </span>
-              <span>{statusMessage}</span>
-            </div>
-          </>
-        )}
-
-        {/* Proximity Interaction Prompt (Appears when Commander Maya walks near a station/teammate!) */}
-        {!isIntroPlaying &&
-          nearStationId &&
-          nearSpec &&
-          !activeStationModal &&
-          !activeDilemma &&
-          !missionOutcome && (
-            <div
-              className={`pointer-events-none fixed left-1/2 z-30 -translate-x-1/2 transition-all ${
-                showBottomDock && !dockCollapsed ? 'bottom-44' : 'bottom-6'
-              }`}
+      {/* Minimal Bottom Quick-Walk Station Strip */}
+      {!isIntroPlaying && !showLevelBrief && !showMenuModal && !missionOutcome && (
+        <div className="pointer-events-none fixed bottom-3 left-1/2 z-20 flex w-full max-w-2xl -translate-x-1/2 flex-col items-center gap-2 px-3">
+          {nearStationId && nearSpec && !activeStationModal && !activeDilemma && (
+            <button
+              type="button"
+              onClick={() => handleInteractStation(nearStationId)}
+              className="pointer-events-auto flex items-center gap-2.5 rounded-2xl border-2 border-amber-400 bg-[#080E1B]/95 px-4 py-2 shadow-2xl hover:bg-slate-900 transition-colors"
             >
-              <button
-                type="button"
-                onClick={() => handleInteractStation(nearStationId)}
-                className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-amber-400 bg-[#0B1120]/95 px-5 py-3 shadow-2xl hover:bg-slate-900 transition-colors"
-              >
-                <span className="rounded-lg bg-amber-500 px-2.5 py-1 font-mono-tabular text-xs font-bold text-slate-950">
-                  E
-                </span>
-                <div className="text-left">
-                  <p className="font-display text-sm font-bold text-white">
-                    Interact: {nearSpec.name}
-                  </p>
-                  <p className="text-xs text-amber-300">
-                    {nearPoint ? nearPoint.promptAction : 'Check in with your Astronaut Team'}
-                  </p>
-                </div>
-              </button>
-            </div>
+              <span className="rounded-lg bg-amber-500 px-2 py-0.5 font-mono-tabular text-xs font-extrabold text-slate-950">
+                E
+              </span>
+              <span className="font-display text-sm font-extrabold text-white">
+                {nearPoint ? nearPoint.promptAction : nearSpec.name}
+              </span>
+            </button>
           )}
 
-        {/* Optional Bottom Quick-Control Bar (Disabled by default; toggle in Controls or press H) */}
-        {showBottomDock && (
-          <BottomControlDock
-            site={site}
-            day={day}
-            maxDays={MAX_DAYS}
-            totalPowerCells={totalPowerCells}
-            powerAllocation={powerAllocation}
-            onSetPower={handleSetPower}
-            selectedModule={selectedModule}
-            onSelectModule={(id) => {
-              setSelectedModule(id);
-              if (id === 'overview') {
-                setCameraMode('overview');
-              } else if (id === 'crew') {
-                setCameraMode('follow');
-              } else {
-                setCameraMode('overview');
-              }
-            }}
-            onAdvanceDay={handleAdvanceDay}
-            collapsed={dockCollapsed}
-            onToggleCollapse={() => setDockCollapsed((prev) => !prev)}
-            disabled={Boolean(activeDilemma || missionOutcome)}
-            hiddenDuringIntro={isIntroPlaying}
-          />
-        )}
-      </main>
+          <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1 rounded-2xl border border-slate-700/80 bg-[#080E1B]/85 p-1.5 shadow-xl backdrop-blur-md">
+            {STATION_POINTS.map((st) => (
+              <button
+                key={st.id}
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick(580);
+                  const len = Math.hypot(st.x, st.z);
+                  const standX =
+                    len < 0.5 ? 0 : st.x - (st.x / len) * (st.collisionRadius + 0.7);
+                  const standZ =
+                    len < 0.5
+                      ? st.collisionRadius + 0.7
+                      : st.z - (st.z / len) * (st.collisionRadius + 0.7);
+                  setWalkToTarget((prev) => ({
+                    x: standX,
+                    z: standZ,
+                    seq: (prev?.seq ?? 0) + 1,
+                  }));
+                }}
+                className={`rounded-xl px-2.5 py-1 text-xs font-bold transition-colors ${
+                  nearStationId === st.id
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'bg-slate-800/90 text-slate-200 hover:bg-slate-700 hover:text-white'
+                }`}
+              >
+                {st.shortName}
+              </button>
+            ))}
 
-      {/* Station Proximity Interaction Modal */}
+            {uncollectedSamples.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const target = uncollectedSamples[0];
+                  soundEngine.playClick(720);
+                  setWalkToTarget((prev) => ({
+                    x: target.x,
+                    z: target.z,
+                    seq: (prev?.seq ?? 0) + 1,
+                  }));
+                }}
+                className="inline-flex items-center gap-1 rounded-xl border border-fuchsia-500/40 bg-fuchsia-950/70 px-2.5 py-1 text-xs font-bold text-fuchsia-200 hover:bg-fuchsia-900/70"
+              >
+                <Gem className="h-3 w-3 text-fuchsia-400" />
+                <span>Crystal ({collectedSampleIds.length}/5)</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Level Start Lesson Card */}
+      {!isIntroPlaying && showLevelBrief && !missionOutcome && !showMenuModal && (
+        <LevelBriefModal
+          level={currentLevel}
+          onStart={() => {
+            soundEngine.playClick(640);
+            setShowLevelBrief(false);
+            soundEngine.speak(`${currentLevel.lessonTitle}. ${currentLevel.lessonText}`);
+          }}
+        />
+      )}
+
+      {/* Station Modal */}
       {activeStationModal && (
         <StationInteractModal
           stationId={activeStationModal}
+          activeAstronaut={activeAstronaut}
+          onSelectAstronaut={(id) => {
+            soundEngine.playSelectModule();
+            setActiveAstronaut(id);
+          }}
           site={site}
           day={day}
-          maxDays={MAX_DAYS}
+          maxDays={currentLevel.maxDays}
           lifeSupport={lifeSupport}
           food={food}
           crewHealth={crewHealth}
           science={science}
-          scienceGoal={SCIENCE_GOAL}
           solarDust={solarDust}
           radiationMsv={effectiveRadiationMsv}
           totalPowerCells={totalPowerCells}
@@ -623,27 +878,38 @@ export default function App() {
           onSetPower={handleSetPower}
           onStationAction={handleStationAction}
           onAdvanceDay={handleAdvanceDay}
-          onOpenNasaData={() => setShowNasaModal(true)}
           onClose={() => setActiveStationModal(null)}
         />
       )}
 
-      {/* Player & Control Settings Modal */}
-      {showSettingsModal && (
-        <SettingsModal
-          showBottomDock={showBottomDock}
-          onToggleBottomDock={() => setShowBottomDock((prev) => !prev)}
-          autoOpenOnApproach={autoOpenOnApproach}
-          onToggleAutoOpen={() => setAutoOpenOnApproach((prev) => !prev)}
-          cameraMode={cameraMode}
-          onChangeCameraMode={setCameraMode}
-          walkSpeed={walkSpeed}
-          onChangeWalkSpeed={setWalkSpeed}
-          onReplayIntro={() => {
-            setIntroRunId((n) => n + 1);
-            setIsIntroPlaying(true);
+      {/* Space Base Game Menu */}
+      {showMenuModal && (
+        <GameMenuModal
+          currentLevelId={currentLevelId}
+          unlockedLevel={unlockedLevel}
+          completedLevels={completedLevels}
+          site={site}
+          activeAstronaut={activeAstronaut}
+          muted={muted}
+          voiceEnabled={voiceEnabled}
+          onSelectLevel={(lvlId) => startLevel(lvlId, false)}
+          onSelectSite={(nextSite) => startLevel(currentLevelId, false, nextSite)}
+          onSelectAstronaut={(id) => {
+            soundEngine.playSelectModule();
+            setActiveAstronaut(id);
           }}
-          onClose={() => setShowSettingsModal(false)}
+          onToggleMute={() => {
+            const next = !muted;
+            soundEngine.setMuted(next);
+            setMuted(next);
+          }}
+          onToggleVoice={() => {
+            const next = !voiceEnabled;
+            soundEngine.setVoiceEnabled(next);
+            setVoiceEnabled(next);
+          }}
+          onReplayIntro={() => startLevel(currentLevelId, true)}
+          onClose={() => setShowMenuModal(false)}
         />
       )}
 
@@ -664,28 +930,23 @@ export default function App() {
         />
       )}
 
-      {showGuideModal && (
-        <GuideModal
-          site={site}
-          scienceGoal={SCIENCE_GOAL}
-          maxDays={MAX_DAYS}
-          onClose={() => setShowGuideModal(false)}
-        />
-      )}
-
       {missionOutcome && (
         <MissionDebriefModal
           outcome={missionOutcome}
           failureReason={failureReason}
-          site={site}
-          day={day}
-          science={science}
-          scienceGoal={SCIENCE_GOAL}
+          level={currentLevel}
+          hasNextLevel={currentLevel.id < GAME_LEVELS.length}
+          unlockedNextLevel={unlockedNewLevel}
           crewHealth={crewHealth}
           lifeSupport={lifeSupport}
           food={food}
-          onReplaySame={() => resetMission(site)}
-          onSwitchAndReplay={(otherSite) => resetMission(otherSite)}
+          science={science}
+          onNextLevel={() => startLevel(Math.min(GAME_LEVELS.length, currentLevel.id + 1), false)}
+          onReplayLevel={() => startLevel(currentLevel.id, false)}
+          onOpenMenu={() => {
+            setMissionOutcome(null);
+            setShowMenuModal(true);
+          }}
         />
       )}
     </div>

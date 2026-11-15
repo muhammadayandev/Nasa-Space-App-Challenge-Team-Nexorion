@@ -27,9 +27,9 @@ export const GuideModal: React.FC<GuideModalProps> = ({
       <div className="w-full max-w-xl rounded-2xl border border-slate-700 bg-[#0B1120] p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold text-sky-400">Junior Astronaut Briefing</p>
+            <p className="text-xs font-semibold text-sky-400">Lone Survivor Mission Briefing ("The Martian" Protocol)</p>
             <h2 id="guide-title" className="mt-1 font-display text-2xl font-bold text-white">
-              Welcome to {siteCfg.name}
+              Surviving Alone at {siteCfg.name}
             </h2>
           </div>
           <button
@@ -49,13 +49,10 @@ export const GuideModal: React.FC<GuideModalProps> = ({
             <Footprints className="mt-0.5 h-5 w-5 shrink-0 text-sky-400" />
             <div>
               <h3 className="font-display text-sm font-bold text-white">
-                1. Walk Around as Commander Maya
+                1. Fix Your Injury, Scan Your Body & Exercise Daily
               </h3>
               <p className="mt-0.5 text-xs text-slate-300">
-                Use <strong>WASD</strong> or <strong>Arrow Keys</strong> to walk across the surface,
-                and drag the mouse to look around! Walk up to any glowing station ring (Solar Panels,
-                Air & Water Tanks, Greenhouse, Rover, Comms, or Habitat) and press <strong>E</strong>{' '}
-                or click to open its menu.
+                After the sudden dust storm forced your crew to launch without you, you survived with a minor injury. Visit the <strong>Med-Bay & Gym</strong> first to suture your wound, run daily <strong>Whole-Body Scans</strong> (checking for DNA/neural radiation damage & 0.38g bone/muscle loss), and use the <strong>Dynamo Resistance Bike</strong> to generate +1 bonus Power Cell!
               </p>
             </div>
           </div>
@@ -64,13 +61,10 @@ export const GuideModal: React.FC<GuideModalProps> = ({
             <Scale className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
             <div>
               <h3 className="font-display text-sm font-bold text-white">
-                2. Make Real NASA Trade-Offs
+                2. Balance Power Quota, Life Support & Active Defense (EDS & Storm Shield)
               </h3>
               <p className="mt-0.5 text-xs text-slate-300">
-                Every action has a cost! Brushing dust off Solar Panels restores electricity,
-                harvesting crops gives food, and drilling rocks earns Science—but uses Air & Water
-                or Crew energy. You can also turn on the optional Bottom Quick Bar inside{' '}
-                <strong>Controls</strong> (or press <strong>H</strong>).
+                Solar energy is limited by Martian dust storms. Allocate your fixed <strong>Power Quota</strong> wisely: <strong>Life Support</strong> clears CO₂ build-up and heats the base; <strong>Active Defense (EDS & Storm Shield)</strong> runs current through coils to generate an Earth-like magnetic field; <strong>Potato Bio-Dome</strong> grows potatoes in composted bio-waste. Always <strong>clean solar panels manually</strong> during dust outages and <strong>take a Decon Shower</strong> after EVA walks!
               </p>
             </div>
           </div>
@@ -79,11 +73,10 @@ export const GuideModal: React.FC<GuideModalProps> = ({
             <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
             <div>
               <h3 className="font-display text-sm font-bold text-white">
-                3. Complete the {maxDays}-{siteCfg.dayUnit} Mission
+                3. Excavate Buried Legacy Hardware & Contact Earth for Rescue
               </h3>
               <p className="mt-0.5 text-xs text-slate-300">
-                Keep Crew Health, Air & Water, and Food above 0%, shelter during solar flares, and
-                collect <strong className="text-white">{scienceGoal} Science Samples</strong>!
+                Previous missions left equipment buried across Mars! Walk or drive the <strong>Mars Buggy</strong> to unearth <strong>5 Buried Legacy Caches</strong> (Pathfinder transponder, RTG heaters, seed crates) and align the <strong>Sat-Comms Array</strong> (<strong className="text-white">{scienceGoal} Rescue Points</strong>) so Earth knows your heart is still beating and sends the rescue ship on {siteCfg.dayUnit} {maxDays}!
               </p>
             </div>
           </div>

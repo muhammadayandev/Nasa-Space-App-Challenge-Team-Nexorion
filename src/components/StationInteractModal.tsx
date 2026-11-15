@@ -1,19 +1,22 @@
 import React from 'react';
 import {
   ArrowRight,
-  Database,
+  BatteryCharging,
   Droplets,
+  FlaskConical,
   HeartPulse,
   Radio,
   Shield,
   Sparkles,
   Sprout,
-  Sun,
   Wrench,
   X,
   Zap,
 } from 'lucide-react';
+import { soundEngine } from '../audio/soundEngine';
 import {
+  ASTRONAUT_PROFILES,
+  AstronautId,
   MODULE_SPECS,
   ModuleId,
   OutpostSiteId,
@@ -23,6 +26,8 @@ import {
 
 interface StationInteractModalProps {
   stationId: Exclude<ModuleId, 'overview'>;
+  activeAstronaut: AstronautId;
+  onSelectAstronaut: (id: AstronautId) => void;
   site: OutpostSiteId;
   day: number;
   maxDays: number;
@@ -30,7 +35,6 @@ interface StationInteractModalProps {
   food: number;
   crewHealth: number;
   science: number;
-  scienceGoal: number;
   solarDust: number;
   radiationMsv: number;
   totalPowerCells: number;
@@ -38,7 +42,6 @@ interface StationInteractModalProps {
   onSetPower: (key: PowerSystemKey, level: number) => void;
   onStationAction: (actionId: string) => void;
   onAdvanceDay: () => void;
-  onOpenNasaData: () => void;
   onClose: () => void;
 }
 
@@ -46,6 +49,8 @@ const LEVEL_LABELS = ['Off', '1', '2', '3'];
 
 export const StationInteractModal: React.FC<StationInteractModalProps> = ({
   stationId,
+  activeAstronaut,
+  onSelectAstronaut,
   site,
   day,
   maxDays,
@@ -53,7 +58,6 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
   food,
   crewHealth,
   science,
-  scienceGoal,
   solarDust,
   radiationMsv,
   totalPowerCells,
@@ -61,7 +65,6 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
   onSetPower,
   onStationAction,
   onAdvanceDay,
-  onOpenNasaData,
   onClose,
 }) => {
   const spec = MODULE_SPECS[stationId];
@@ -78,147 +81,138 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/55 p-4 sm:items-center"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="station-modal-title"
     >
-      <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-[#0B1120] p-5 shadow-2xl">
+      <div className="custom-scroll max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[2rem] border-4 border-sky-400/50 bg-[#081020] p-6 sm:p-8 shadow-2xl animate-[popupSlideUp_0.25s_ease-out]">
         {/* Header */}
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold text-amber-400">{spec.role}</p>
-            <h2 id="station-modal-title" className="mt-0.5 font-display text-xl font-bold text-white">
+            <p className="text-xs font-extrabold uppercase tracking-wider text-amber-400">
+              {spec.role}
+            </p>
+            <h2
+              id="station-modal-title"
+              className="mt-1 font-display text-2xl sm:text-3xl font-extrabold text-white"
+            >
               {spec.name}
             </h2>
           </div>
+
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close station menu"
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+            aria-label="Close"
+            className="rounded-2xl border-2 border-slate-700 bg-slate-900 p-2.5 text-slate-300 hover:border-white hover:text-white"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <p className="mt-2.5 text-xs leading-relaxed text-slate-300">{spec.plainExplanation}</p>
+        {/* Friendly 1-line note */}
+        <p className="mt-3 text-base font-medium text-slate-100">{spec.plainExplanation}</p>
 
-        {/* Station-Specific Live Status */}
-        <div className="mt-3.5 rounded-xl border border-slate-800 bg-slate-900/90 p-3">
+        {/* Live Gauge Chip */}
+        <div className="mt-4 flex items-center justify-between rounded-2xl border-2 border-slate-800 bg-slate-900 px-4 py-3 text-sm">
           {stationId === 'solar' && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 text-slate-300">
-                <Sun className="h-4 w-4 text-amber-400" />
-                Panel Dust Coverage
+            <>
+              <span className="font-semibold text-slate-300">Dust on Panels:</span>
+              <span className={solarDust >= 40 ? 'font-extrabold text-amber-400' : 'font-extrabold text-emerald-400'}>
+                {solarDust}% {solarDust >= 40 ? 'Clean me!' : 'Nice & Clean'}
               </span>
-              <span
-                className={`font-mono-tabular font-bold ${
-                  solarDust >= 40 ? 'text-amber-400' : 'text-emerald-400'
-                }`}
-              >
-                {solarDust}% {solarDust >= 40 ? '(Needs Cleaning)' : '(Clean)'}
-              </span>
-            </div>
+            </>
           )}
-
           {stationId === 'lifesupport' && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 text-slate-300">
-                <Droplets className="h-4 w-4 text-sky-400" />
-                Oxygen & Recycled Water Tank
-              </span>
-              <span className="font-mono-tabular font-bold text-white">
-                {Math.round(lifeSupport)}%
-              </span>
-            </div>
+            <>
+              <span className="font-semibold text-slate-300">Air Level:</span>
+              <span className="font-extrabold text-sky-300">{Math.round(lifeSupport)}%</span>
+            </>
           )}
-
           {stationId === 'greenhouse' && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 text-slate-300">
-                <Sprout className="h-4 w-4 text-emerald-400" />
-                Food Storage & Hydroponics
-              </span>
-              <span className="font-mono-tabular font-bold text-white">{Math.round(food)}%</span>
-            </div>
+            <>
+              <span className="font-semibold text-slate-300">Food Left:</span>
+              <span className="font-extrabold text-emerald-300">{Math.round(food)}%</span>
+            </>
           )}
-
           {stationId === 'habitat' && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 text-slate-300">
-                <Shield className="h-4 w-4 text-sky-400" />
-                Current Radiation Dose Inside
+            <>
+              <span className="font-semibold text-slate-300">Sun Rays Outside:</span>
+              <span className={radiationMsv > 1.8 ? 'font-extrabold text-rose-400' : 'font-extrabold text-emerald-400'}>
+                {radiationMsv > 1.8 ? 'Danger! Raise Shield!' : 'Safe Inside'}
               </span>
-              <span className="font-mono-tabular font-bold text-white">
-                {radiationMsv.toFixed(2)} mSv/day
-              </span>
-            </div>
+            </>
           )}
-
-          {stationId === 'science' && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 text-slate-300">
-                <Sparkles className="h-4 w-4 text-cyan-400" />
-                Mission Science Samples
-              </span>
-              <span className="font-mono-tabular font-bold text-white">
-                {science} / {scienceGoal}
-              </span>
-            </div>
+          {(stationId === 'science' || stationId === 'comms') && (
+            <>
+              <span className="font-semibold text-slate-300">Science Score:</span>
+              <span className="font-extrabold text-cyan-300">{science} pts</span>
+            </>
           )}
-
-          {stationId === 'comms' && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 text-slate-300">
-                <Radio className="h-4 w-4 text-cyan-400" />
-                Earth Radio Delay ({siteCfg.name})
-              </span>
-              <span className="font-mono-tabular font-bold text-white">{siteCfg.commDelayText}</span>
-            </div>
-          )}
-
           {stationId === 'crew' && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 text-slate-300">
-                <HeartPulse className="h-4 w-4 text-emerald-400" />
-                Team Health (Maya, Leo & Zara)
-              </span>
-              <span className="font-mono-tabular font-bold text-white">
-                {Math.round(crewHealth)}%
-              </span>
-            </div>
+            <>
+              <span className="font-semibold text-slate-300">Crew Health:</span>
+              <span className="font-extrabold text-emerald-300">{Math.round(crewHealth)}%</span>
+            </>
           )}
         </div>
 
-        {/* Power Level Selector for This Station (when applicable) */}
+        {/* Crew Switcher */}
+        {stationId === 'crew' && (
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            {Object.values(ASTRONAUT_PROFILES).map((prof) => {
+              const selected = prof.id === activeAstronaut;
+              return (
+                <button
+                  key={prof.id}
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playClick(640);
+                    onSelectAstronaut(prof.id);
+                  }}
+                  className={`rounded-2xl border-2 p-3 text-center transition-all ${
+                    selected
+                      ? 'border-sky-400 bg-sky-500/20 scale-[1.02]'
+                      : 'border-slate-800 bg-slate-900 hover:border-slate-600'
+                  }`}
+                >
+                  <div className="text-3xl">{prof.emoji}</div>
+                  <p className="mt-1 font-display text-sm font-extrabold text-white">{prof.name}</p>
+                  <p className="text-[11px] font-semibold text-amber-300">{prof.perkSummary}</p>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Power Switch */}
         {powerKey && currentPower !== null && (
-          <div className="mt-3.5 rounded-xl border border-slate-800 bg-slate-900/90 p-3">
-            <div className="flex items-center justify-between text-xs mb-2">
-              <span className="inline-flex items-center gap-1.5 font-semibold text-white">
-                <Zap className="h-3.5 w-3.5 text-amber-400" />
-                Power Assigned Here
+          <div className="mt-4 rounded-2xl border-2 border-slate-800 bg-slate-900 p-4">
+            <div className="flex items-center justify-between text-sm font-extrabold">
+              <span className="flex items-center gap-1.5 text-white">
+                <Zap className="h-4 w-4 text-amber-400" />
+                <span>Power Level</span>
               </span>
-              <span className="font-mono-tabular text-slate-400">
-                Spare Power: {freeCells}/{totalPowerCells} cells
-              </span>
+              <span className="text-amber-300">{freeCells}⚡ free</span>
             </div>
-            <div className="grid grid-cols-4 gap-1.5 rounded-lg bg-slate-950 p-1">
+
+            <div className="mt-2.5 grid grid-cols-4 gap-2">
               {[0, 1, 2, 3].map((lvl) => {
-                const isSelected = currentPower === lvl;
                 const canReach = lvl <= maxReachable;
+                const active = currentPower === lvl;
                 return (
                   <button
                     key={lvl}
                     type="button"
-                    disabled={!canReach}
+                    disabled={!canReach && !active}
                     onClick={() => onSetPower(powerKey, lvl)}
-                    className={`h-8 rounded-md text-xs font-bold transition-colors ${
-                      isSelected
-                        ? 'bg-sky-500 text-slate-950'
+                    className={`rounded-xl border-b-4 py-2.5 font-mono-tabular text-sm font-extrabold transition-all active:translate-y-0.5 active:border-b-2 ${
+                      active
+                        ? 'border-sky-600 bg-sky-400 text-slate-950'
                         : canReach
-                        ? 'text-slate-200 hover:bg-slate-800'
-                        : 'text-slate-600 cursor-not-allowed'
+                        ? 'border-slate-950 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                        : 'border-slate-950 bg-slate-950 text-slate-600 cursor-not-allowed'
                     }`}
                   >
                     {LEVEL_LABELS[lvl]}
@@ -229,154 +223,179 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
           </div>
         )}
 
-        {/* Hands-On Station Action (Every station has a real interactive trade-off!) */}
-        <div className="mt-4 space-y-2.5">
+        {/* Actions */}
+        <div className="mt-4 space-y-3">
           {stationId === 'solar' && (
-            <button
-              type="button"
-              disabled={solarDust < 10}
-              onClick={() => onStationAction('clean-solar')}
-              className="flex w-full items-center justify-between rounded-xl border border-amber-500/50 bg-amber-500/10 p-3.5 text-left hover:bg-amber-500/20 disabled:opacity-45 disabled:cursor-not-allowed transition-colors"
-            >
-              <div>
-                <p className="inline-flex items-center gap-1.5 font-display text-sm font-bold text-white">
-                  <Wrench className="h-4 w-4 text-amber-400" />
-                  Brush Dust Off Solar Panels
-                </p>
-                <p className="mt-1 text-xs text-emerald-400">Gain: Resets dust to 0% & +1 Spare Power Cell</p>
-                <p className="text-xs text-amber-400">Cost: -8% Air & Water · -5% Crew Health</p>
-              </div>
-              <ArrowRight className="h-4 w-4 shrink-0 text-amber-400" />
-            </button>
+            <>
+              <ActionButton
+                icon={<Wrench className="h-5 w-5 text-amber-400" />}
+                title="Sweep Solar Panels"
+                gain="Clean panels & +1 Power tomorrow"
+                cost={activeAstronaut === 'zara' ? '-4% Air & -5% Health' : '-8% Air & -5% Health'}
+                borderClass="border-amber-400/50 bg-amber-500/15 hover:bg-amber-500/25"
+                onClick={() => onStationAction('clean-solar')}
+              />
+              <ActionButton
+                icon={<BatteryCharging className="h-5 w-5 text-yellow-400" />}
+                title="Charge Backup Battery"
+                gain="+1 Power tomorrow"
+                cost="-6% Air & -7% Health"
+                borderClass="border-yellow-400/50 bg-yellow-500/15 hover:bg-yellow-500/25"
+                onClick={() => onStationAction('battery-boost')}
+              />
+            </>
           )}
 
           {stationId === 'lifesupport' && (
-            <button
-              type="button"
-              onClick={() => onStationAction('flush-filters')}
-              className="flex w-full items-center justify-between rounded-xl border border-sky-500/50 bg-sky-500/10 p-3.5 text-left hover:bg-sky-500/20 transition-colors"
-            >
-              <div>
-                <p className="inline-flex items-center gap-1.5 font-display text-sm font-bold text-white">
-                  <Droplets className="h-4 w-4 text-sky-400" />
-                  Scrub CO₂ & Flush Water Filters
-                </p>
-                <p className="mt-1 text-xs text-emerald-400">Gain: +12% Air & Water right now</p>
-                <p className="text-xs text-amber-400">Cost: -7% Crew Health (manual maintenance)</p>
-              </div>
-              <ArrowRight className="h-4 w-4 shrink-0 text-sky-400" />
-            </button>
+            <>
+              <ActionButton
+                icon={<Droplets className="h-5 w-5 text-sky-400" />}
+                title="Clean Air Filters"
+                gain={activeAstronaut === 'maya' ? '+17% Air' : '+12% Air'}
+                cost="-7% Health"
+                borderClass="border-sky-400/50 bg-sky-500/15 hover:bg-sky-500/25"
+                onClick={() => onStationAction('flush-filters')}
+              />
+              <ActionButton
+                icon={<Sparkles className="h-5 w-5 text-cyan-400" />}
+                title="Make Extra Oxygen"
+                gain={activeAstronaut === 'maya' ? '+15% Air' : '+10% Air'}
+                cost="-4% Food & -4% Health"
+                borderClass="border-cyan-400/50 bg-cyan-500/15 hover:bg-cyan-500/25"
+                onClick={() => onStationAction('moxie-split')}
+              />
+            </>
           )}
 
           {stationId === 'greenhouse' && (
-            <button
-              type="button"
-              onClick={() => onStationAction('harvest-greens')}
-              className="flex w-full items-center justify-between rounded-xl border border-emerald-500/50 bg-emerald-500/10 p-3.5 text-left hover:bg-emerald-500/20 transition-colors"
-            >
-              <div>
-                <p className="inline-flex items-center gap-1.5 font-display text-sm font-bold text-white">
-                  <Sprout className="h-4 w-4 text-emerald-400" />
-                  Harvest Fresh Hydroponic Greens
-                </p>
-                <p className="mt-1 text-xs text-emerald-400">Gain: +12% Food & +5% Crew Health</p>
-                <p className="text-xs text-amber-400">Cost: -9% Water to start next crop batch</p>
-              </div>
-              <ArrowRight className="h-4 w-4 shrink-0 text-emerald-400" />
-            </button>
+            <>
+              <ActionButton
+                icon={<Sprout className="h-5 w-5 text-emerald-400" />}
+                title="Pick Fresh Crops"
+                gain={activeAstronaut === 'leo' ? '+17% Food & +10% Health' : '+12% Food & +5% Health'}
+                cost="-9% Air/Water"
+                borderClass="border-emerald-400/50 bg-emerald-500/15 hover:bg-emerald-500/25"
+                onClick={() => onStationAction('harvest-greens')}
+              />
+              <ActionButton
+                icon={<FlaskConical className="h-5 w-5 text-pink-400" />}
+                title="Test Space Plants"
+                gain="+1 Science & +6% Food"
+                cost="-8% Air/Water"
+                borderClass="border-pink-400/50 bg-pink-500/15 hover:bg-pink-500/25"
+                onClick={() => onStationAction('veggie-study')}
+              />
+            </>
           )}
 
           {stationId === 'science' && (
-            <button
-              type="button"
-              onClick={() => onStationAction('drill-sample')}
-              className="flex w-full items-center justify-between rounded-xl border border-cyan-500/50 bg-cyan-500/10 p-3.5 text-left hover:bg-cyan-500/20 transition-colors"
-            >
-              <div>
-                <p className="inline-flex items-center gap-1.5 font-display text-sm font-bold text-white">
-                  <Sparkles className="h-4 w-4 text-cyan-400" />
-                  Run Rover Core Drill Sample
-                </p>
-                <p className="mt-1 text-xs text-emerald-400">Gain: +1 Science Sample toward goal</p>
-                <p className="text-xs text-amber-400">Cost: -9% Air & Water · -6% Crew Health</p>
-              </div>
-              <ArrowRight className="h-4 w-4 shrink-0 text-cyan-400" />
-            </button>
+            <>
+              <ActionButton
+                icon={<Sparkles className="h-5 w-5 text-cyan-400" />}
+                title="Dig Mars Rocks"
+                gain="+1 Science Point"
+                cost={activeAstronaut === 'zara' ? '-5% Air & -6% Health' : '-9% Air & -6% Health'}
+                borderClass="border-cyan-400/50 bg-cyan-500/15 hover:bg-cyan-500/25"
+                onClick={() => onStationAction('drill-sample')}
+              />
+              <ActionButton
+                icon={<FlaskConical className="h-5 w-5 text-violet-400" />}
+                title="Scan Tiny Microbes"
+                gain="+1 Science & +4% Health"
+                cost="-7% Food"
+                borderClass="border-violet-400/50 bg-violet-500/15 hover:bg-violet-500/25"
+                onClick={() => onStationAction('osdr-bio-scan')}
+              />
+            </>
           )}
 
           {stationId === 'comms' && (
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => onStationAction('beam-earth')}
-                className="flex w-full items-center justify-between rounded-xl border border-cyan-500/50 bg-cyan-500/10 p-3.5 text-left hover:bg-cyan-500/20 transition-colors"
-              >
-                <div>
-                  <p className="inline-flex items-center gap-1.5 font-display text-sm font-bold text-white">
-                    <Radio className="h-4 w-4 text-cyan-400" />
-                    Transmit High-Power Data to Earth
-                  </p>
-                  <p className="mt-1 text-xs text-emerald-400">Gain: +1 Science Sample transmitted</p>
-                  <p className="text-xs text-amber-400">Cost: -10% Air & Water (dish cooling)</p>
-                </div>
-                <ArrowRight className="h-4 w-4 shrink-0 text-cyan-400" />
-              </button>
+            <ActionButton
+              icon={<Radio className="h-5 w-5 text-cyan-400" />}
+              title="Call Home to Earth"
+              gain="+1 Science Point"
+              cost="-10% Cooling Water"
+              borderClass="border-cyan-400/50 bg-cyan-500/15 hover:bg-cyan-500/25"
+              onClick={() => onStationAction('beam-earth')}
+            />
+          )}
+
+          {stationId === 'crew' && (
+            <ActionButton
+              icon={<HeartPulse className="h-5 w-5 text-emerald-400" />}
+              title="Snack & Rest Time"
+              gain="+12% Crew Health"
+              cost="-8% Food"
+              borderClass="border-emerald-400/50 bg-emerald-500/15 hover:bg-emerald-500/25"
+              onClick={() => onStationAction('crew-snack')}
+            />
+          )}
+
+          {stationId === 'habitat' && (
+            <>
+              <ActionButton
+                icon={<Shield className="h-5 w-5 text-sky-400" />}
+                title="Turn On Water Shield"
+                gain="Blocks Sun Rays & +6% Health"
+                cost={activeAstronaut === 'maya' ? '-4% Air/Water' : '-8% Air/Water'}
+                borderClass="border-sky-400/50 bg-sky-500/15 hover:bg-sky-500/25"
+                onClick={() => onStationAction('water-wall-shield')}
+              />
               <button
                 type="button"
                 onClick={() => {
                   onClose();
-                  onOpenNasaData();
+                  onAdvanceDay();
                 }}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900 py-2.5 text-xs font-semibold text-sky-300 hover:bg-slate-800 transition-colors"
+                className="flex w-full items-center justify-between rounded-2xl border-b-4 border-amber-600 bg-amber-400 p-4 text-left text-slate-950 hover:bg-amber-300 active:translate-y-0.5 active:border-b-2 transition-all"
               >
-                <Database className="h-3.5 w-3.5" />
-                <span>View Live NASA DONKI & RadLab Data</span>
+                <div>
+                  <p className="font-display text-base font-extrabold">
+                    {day >= maxDays ? 'Finish This Level!' : `Go to Sleep (Start ${siteCfg.dayUnit} ${day + 1})`}
+                  </p>
+                </div>
+                <ArrowRight className="h-5 w-5 shrink-0" />
               </button>
-            </div>
-          )}
-
-          {stationId === 'crew' && (
-            <button
-              type="button"
-              onClick={() => onStationAction('crew-snack')}
-              className="flex w-full items-center justify-between rounded-xl border border-emerald-500/50 bg-emerald-500/10 p-3.5 text-left hover:bg-emerald-500/20 transition-colors"
-            >
-              <div>
-                <p className="inline-flex items-center gap-1.5 font-display text-sm font-bold text-white">
-                  <HeartPulse className="h-4 w-4 text-emerald-400" />
-                  Share Fresh Meal & Medical Check
-                </p>
-                <p className="mt-1 text-xs text-emerald-400">Gain: +10% Crew Health</p>
-                <p className="text-xs text-amber-400">Cost: -9% Food Supply</p>
-              </div>
-              <ArrowRight className="h-4 w-4 shrink-0 text-emerald-400" />
-            </button>
-          )}
-
-          {stationId === 'habitat' && (
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onAdvanceDay();
-              }}
-              className="flex w-full items-center justify-between rounded-xl bg-amber-500 p-3.5 text-left text-slate-950 hover:bg-amber-400 transition-colors"
-            >
-              <div>
-                <p className="font-display text-sm font-bold">
-                  {day >= maxDays
-                    ? 'Complete Mission & Report to Earth'
-                    : `Crew Rest & Start ${siteCfg.dayUnit} ${day + 1}`}
-                </p>
-                <p className="mt-0.5 text-xs font-medium text-slate-900">
-                  Applies today’s power settings and checks space weather!
-                </p>
-              </div>
-              <ArrowRight className="h-5 w-5 shrink-0" />
-            </button>
+            </>
           )}
         </div>
       </div>
     </div>
   );
 };
+
+interface ActionButtonProps {
+  icon: React.ReactNode;
+  title: string;
+  gain: string;
+  cost: string;
+  borderClass: string;
+  onClick: () => void;
+}
+
+const ActionButton: React.FC<ActionButtonProps> = ({
+  icon,
+  title,
+  gain,
+  cost,
+  borderClass,
+  onClick,
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`flex w-full items-center justify-between rounded-2xl border-2 p-4 text-left transition-all active:scale-[0.99] ${borderClass}`}
+  >
+    <div>
+      <p className="inline-flex items-center gap-2 font-display text-base font-extrabold text-white">
+        {icon}
+        <span>{title}</span>
+      </p>
+      <div className="mt-1 flex flex-wrap gap-3 text-xs font-bold">
+        <span className="text-emerald-400">+{gain}</span>
+        <span className="text-amber-300">{cost}</span>
+      </div>
+    </div>
+    <ArrowRight className="h-5 w-5 shrink-0 text-white" />
+  </button>
+);

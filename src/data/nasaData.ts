@@ -42,61 +42,73 @@ export interface NasaDatasetSnapshot {
 
 export const RADLAB_BENCHMARKS: RadLabBenchmark[] = [
   {
-    label: 'Earth Sea Level (Normal)',
+    label: 'Earth Sea Level (Dipole Magnetosphere)',
     doseMsvPerDay: 0.007,
     instrument: 'Ground Reference',
-    note: 'Earth’s thick air and magnetic field block almost all space radiation.',
+    note: 'Earth’s natural magnetic field and thick atmosphere deflect Galactic Cosmic Rays (GCR) and Solar Particle Events (SPE).',
   },
   {
-    label: 'International Space Station (ISS)',
-    doseMsvPerDay: 0.45,
-    instrument: 'ISS RadLab / DOSIS-3D',
-    note: 'Astronauts inside the ISS receive ~60x more radiation than on Earth.',
+    label: 'Active Defense (EDS & Storm Shield) at Full Power',
+    doseMsvPerDay: 0.18,
+    instrument: 'Habitat Superconducting Coil Array',
+    note: 'Running high current through coils around the habitat generates an artificial magnetic field like Earth’s, protecting cellular DNA and neural structures.',
+  },
+  {
+    label: 'Mars Surface Baseline (Unshielded GCR)',
+    doseMsvPerDay: 0.67,
+    instrument: 'Curiosity RAD Instrument',
+    note: 'Constant Galactic Cosmic Rays increase long-term risks of cancer, cardiovascular disease, and brain neural alterations.',
   },
   {
     label: 'Lunar Surface (Quiet Sun)',
     doseMsvPerDay: 1.37,
     instrument: 'Chang’e-4 / LRO CRaTER',
-    note: 'The Moon has no atmosphere or magnetic shield, so baseline radiation is high.',
+    note: 'With zero atmosphere or global magnetic field, radiation exposure is over 190x higher than on Earth.',
   },
   {
-    label: 'Mars Surface (Jezero Crater)',
-    doseMsvPerDay: 0.67,
-    instrument: 'Curiosity RAD Instrument',
-    note: 'Mars’ thin CO₂ air blocks roughly half the cosmic rays compared to the Moon.',
-  },
-  {
-    label: 'Solar Particle Storm (X-Class Flare)',
+    label: 'Solar Particle Event (SPE / X-Class Storm)',
     doseMsvPerDay: 4.85,
     instrument: 'NASA DONKI + RAD Storm Model',
-    note: 'Without water-wall storm shielding, a major flare rapidly harms crew cells.',
+    note: 'Without Active Defense (EDS & Storm Shield), an SPE causes acute radiation sickness, DNA strand breaks, and immune collapse.',
   },
 ];
 
 export const OSDR_STUDIES: OsdrStudy[] = [
   {
-    id: 'OSD-102',
-    title: 'Plant Growth & Microgravity Stress (VEGGIE)',
-    topic: 'Space Agriculture',
+    id: 'HRP-RAD-01',
+    title: 'Radiation Risks: DNA Damage, Cancer, Cardiovascular & Neural Alterations',
+    topic: 'Galactic Cosmic Rays (GCR) & Solar Particle Events (SPE)',
     finding:
-      'Red romaine lettuce and leafy greens grown under tuned LED light give astronauts fresh vitamins and help scrub CO₂ into breathable oxygen.',
-    gameplayLink: 'Powers the Hydroponics Greenhouse trade-off between electricity and crew food/O₂.',
+      'High-energy cosmic rays and solar proton storms shatter cellular DNA strands, accelerate cardiovascular disease and cancer risk, and alter neural dendrites in the brain.',
+    gameplayLink:
+      'Perform Daily Whole-Body Scans in the Med-Bay and power Active Defense (EDS & Storm Shield) coils to generate an artificial magnetic field.',
   },
   {
-    id: 'OSD-48',
-    title: 'Muscle & Bone Density Loss in Low Gravity',
-    topic: 'Astronaut Health',
+    id: 'HRP-GRAV-02',
+    title: 'Lower Gravity: Muscle Atrophy, Bone Loss & Spatial Disorientation',
+    topic: '0.38g / 0.16g Physical Deconditioning',
     finding:
-      'In 0.16g (Moon) or 0.38g (Mars), muscles and bones weaken unless crew spend daily energy exercising and eating nutrient-rich meals.',
-    gameplayLink: 'Explains why cutting food or life support weakens Crew Health over multiple sols.',
+      'Reduced gravity causes rapid muscle atrophy, bone mineral density loss, cardiovascular deconditioning, balance loss, spatial disorientation, and motion sickness.',
+    gameplayLink:
+      'Use the Dynamo Resistance Exercise machine daily to restore muscle/bone density while generating +1 bonus electrical Power Cell!',
   },
   {
-    id: 'OSD-578',
-    title: 'Immune Response Under Space Radiation',
-    topic: 'Radiation Biology',
+    id: 'HRP-GUT-03',
+    title: 'Gut Microbiome Damage, Dormant Virus Reactivation & Bio-Waste Potatoes',
+    topic: 'Microbiome, Immunity & Space Agriculture',
     finding:
-      'Higher radiation doses stress immune cells and sleep cycles, making storm shelter shielding critical during solar flares.',
-    gameplayLink: 'Connects DONKI flare alerts to crew health and shielding power choices.',
+      'Radiation and isolation stress damage gut flora and cause dormant viruses (like Epstein-Barr & Varicella) to reactivate. Growing potatoes in composted bio-waste provides fresh calories and prebiotic fiber.',
+    gameplayLink:
+      'Tend the Potato Bio-Dome using bio-waste fertilizer and ration meals carefully to survive until rescue.',
+  },
+  {
+    id: 'HRP-PSY-04',
+    title: 'Cognitive & Psychological Health: Isolation, Stress & High Workloads',
+    topic: 'Behavioral Health & Sleep Deprivation',
+    finding:
+      'Being stranded millions of kilometers from Earth triggers severe isolation, stress, loss of motivation/mood, and cognitive errors from sleep deprivation and high workloads.',
+    gameplayLink:
+      'Take post-EVA Decon Showers, establish satellite links with Earth, and balance rest cycles to keep Cognitive Morale high.',
   },
 ];
 
@@ -108,7 +120,8 @@ export const CURATED_ARCHIVE_FLARES: SolarFlareEvent[] = [
     sourceLocation: 'S18W89 (Active Region 13664)',
     severity: 'extreme',
     radiationMsvDay: 4.85,
-    kidSummary: 'Giant X-class solar flare! Needs full storm shutters to protect astronauts.',
+    kidSummary:
+      'Extreme Solar Particle Event (SPE)! Energize Active Defense (EDS & Storm Shield) coils immediately to prevent cellular DNA & neural damage.',
   },
   {
     id: '2024-10-03-X9.0',
@@ -117,7 +130,8 @@ export const CURATED_ARCHIVE_FLARES: SolarFlareEvent[] = [
     sourceLocation: 'S15W08 (Active Region 13842)',
     severity: 'extreme',
     radiationMsvDay: 5.1,
-    kidSummary: 'Huge burst of solar X-rays and particles capable of disrupting radio signals.',
+    kidSummary:
+      'Massive proton burst capable of blacking out satellite communications and triggering acute radiation sickness.',
   },
   {
     id: '2025-02-23-M4.9',
@@ -126,7 +140,8 @@ export const CURATED_ARCHIVE_FLARES: SolarFlareEvent[] = [
     sourceLocation: 'N14W76 (Active Region 14001)',
     severity: 'strong',
     radiationMsvDay: 2.65,
-    kidSummary: 'Medium-strong flare raising surface radiation. Extra shielding recommended.',
+    kidSummary:
+      'Strong solar flare raising surface GCR/SPE dose. Route extra Power Cells to Active Defense magnetic coils.',
   },
   {
     id: '2025-05-13-M7.7',
@@ -135,40 +150,53 @@ export const CURATED_ARCHIVE_FLARES: SolarFlareEvent[] = [
     sourceLocation: 'N09E64 (Active Region 14087)',
     severity: 'strong',
     radiationMsvDay: 3.3,
-    kidSummary: 'Fast solar particle burst that also dims radio comms with Earth.',
+    kidSummary:
+      'High-speed solar particle wave that interferes with orbital satellite telemetry and increases cardiovascular/DNA stress.',
   },
 ];
 
 export const KID_GLOSSARY: GlossaryItem[] = [
   {
-    term: 'Sol',
-    meaning: 'One full day and night on Mars (24 hours and 39 minutes — just 39 minutes longer than an Earth day!).',
-    example: 'On the Moon, we count Earth Days; on Mars, astronauts count Sols.',
+    term: 'Active Defense (EDS & Storm Shield)',
+    meaning:
+      'Our primary radiation & dust defense system. It runs electrical current through coils around the spacecraft/habitat to create an artificial magnetic field—just like Earth’s magnetosphere!',
+    example:
+      'Why does it consume so much power? Generating a magnetic bubble strong enough to deflect cosmic rays requires heavy continuous electrical current.',
   },
   {
-    term: 'Radiation Dose (mSv)',
-    meaning: 'Millisieverts (mSv) measure how much invisible space energy hits an astronaut’s body.',
-    example: 'Water tanks and thick walls absorb radiation before it reaches the crew.',
+    term: 'ECLSS Life Support (CO₂ & Heating)',
+    meaning:
+      'Environmental Control and Life Support System. It clears toxic CO₂ build-up from cabin air and heats the habitat against freezing -80°C Martian temperatures.',
+    example:
+      'If Life Support loses power during a dust storm, CO₂ levels spike and the base freezes rapidly.',
   },
   {
-    term: 'Solar Flare / CME',
-    meaning: 'A giant burst of light and charged particles shooting off the Sun.',
-    example: 'NASA’s DONKI database watches the Sun so astronauts get early storm warnings.',
+    term: 'Why Balance Power Quota?',
+    meaning:
+      'Solar energy on Mars is limited and unpredictable because dust storms prevent sunlight from reaching the solar panels.',
+    example:
+      'You are given a fixed quota of Power Cells each Sol and must clean panels manually if automated systems fail—or generate power via the Dynamo Exercise Bike!',
   },
   {
-    term: 'Hydroponics',
-    meaning: 'Growing fresh plants using mineral water and special LED lights instead of dirt.',
-    example: 'Plants make food AND turn stale carbon dioxide back into fresh oxygen!',
+    term: 'Bio-Waste Potato Farming',
+    meaning:
+      'Growing high-calorie potato tubers by mixing sterile Martian regolith with your own composted organic waste and recycled water.',
+    example:
+      'Inspired by "The Martian", growing potatoes solves food shortages and supplies fiber to repair damaged gut health.',
   },
   {
-    term: 'Regolith',
-    meaning: 'The sharp, powdery broken rock and dust covering the Moon and Mars.',
-    example: 'Scientists drill regolith to look for frozen water ice and ancient lake mud.',
+    term: 'Lower-Gravity Deconditioning',
+    meaning:
+      'In Mars (0.38g) or Moon (0.16g) gravity, astronauts suffer muscle atrophy, bone density loss, cardiovascular deconditioning, spatial disorientation, balance loss, and motion sickness.',
+    example:
+      'Daily resistance training and whole-body scans counter bone/muscle loss while generating bonus electricity.',
   },
   {
-    term: 'Light-Speed Delay',
-    meaning: 'Even at the speed of light, radio messages take time to travel across space.',
-    example: 'Moon radio takes 1.3 seconds; Mars radio takes 4 to 22 minutes each way!',
+    term: 'Post-EVA Decon Shower',
+    meaning:
+      'Taking a pressurized wash after coming inside from a Mars or Moon walk to remove electrostatically sticky, toxic dust and boost psychological morale.',
+    example:
+      'Always take a shower in the ECLSS module after manual solar panel cleaning or Mars Buggy salvage runs!',
   },
 ];
 
@@ -182,20 +210,20 @@ function classifyFlare(classType: string): {
     return {
       severity: 'extreme',
       radiationMsvDay: 4.85,
-      kidSummary: `Major ${upper} solar flare recorded by NASA DONKI! High radiation risk.`,
+      kidSummary: `Major ${upper} Solar Particle Event recorded by NASA DONKI! High DNA & neural radiation risk—power Active Defense coils!`,
     };
   }
   if (upper.startsWith('M')) {
     return {
       severity: 'strong',
       radiationMsvDay: 2.8,
-      kidSummary: `Moderate-strong ${upper} solar flare detected. Shielding helps protect crew.`,
+      kidSummary: `Moderate-strong ${upper} solar flare detected. Active Defense (EDS & Storm Shield) recommended.`,
     };
   }
   return {
     severity: 'moderate',
     radiationMsvDay: 1.45,
-    kidSummary: `Minor ${upper} solar activity. Normal shielding handles this safely.`,
+    kidSummary: `Minor ${upper} solar activity. Baseline Active Defense magnetic field handles this safely.`,
   };
 }
 
