@@ -3,12 +3,12 @@ import { Gem, Sparkles } from 'lucide-react';
 import { soundEngine } from './audio/soundEngine';
 import { DecisionModal } from './components/DecisionModal';
 import { GameMenuModal } from './components/GameMenuModal';
-import { IntroLaunchOverlay } from './components/IntroLaunchOverlay';
 import { LevelBriefModal } from './components/LevelBriefModal';
 import { MissionDebriefModal } from './components/MissionDebriefModal';
 import { NasaDataModal } from './components/NasaDataModal';
 import { StationInteractModal } from './components/StationInteractModal';
 import { TopTelemetryBar } from './components/TopTelemetryBar';
+import { IntroCutscene } from './cutscene/IntroCutscene';
 import {
   CURATED_ARCHIVE_FLARES,
   fetchNasaDataset,
@@ -23,7 +23,6 @@ import {
   DilemmaChoice,
   FIELD_SAMPLES,
   GAME_LEVELS,
-  INTRO_LAUNCH_POPUPS,
   MISSION_DILEMMAS,
   MissionDilemma,
   MODULE_SPECS,
@@ -93,14 +92,9 @@ export default function App() {
   const [site, setSite] = useState<OutpostSiteId>('mars');
   const [activeAstronaut, setActiveAstronaut] = useState<AstronautId>('maya');
 
-  // Always start with the short animated rocket-to-Mars intro!
-  const [introRunId, setIntroRunId] = useState<number>(1);
+  // Always start with the imported Mars intro cutscene!
   const [isIntroPlaying, setIsIntroPlaying] = useState<boolean>(true);
-  const [introProgress, setIntroProgress] = useState<number>(0);
-  const [introTimeSec, setIntroTimeSec] = useState<number>(0);
-  const [introPaused, setIntroPaused] = useState<boolean>(false);
-  const [audioLocked, setAudioLocked] = useState<boolean>(() => soundEngine.isSuspended());
-  const lastIntroPopupIdRef = useRef<string | null>(null);
+  const [introAutostart, setIntroAutostart] = useState<boolean>(false);
 
   const [showLevelBrief, setShowLevelBrief] = useState<boolean>(true);
   const [showMenuModal, setShowMenuModal] = useState<boolean>(false);
@@ -179,64 +173,7 @@ export default function App() {
     }
   }, [unlockedLevel, completedLevels]);
 
-  const activeIntroPopup = useMemo(() => {
-    const match = INTRO_LAUNCH_POPUPS.find(
-      (p) => introTimeSec >= p.minTimeSec && introTimeSec < p.maxTimeSec
-    );
-    return match || INTRO_LAUNCH_POPUPS[INTRO_LAUNCH_POPUPS.length - 1];
-  }, [introTimeSec]);
 
-  const handleUnlockAudio = useCallback(() => {
-    soundEngine.unlock();
-    const stillLocked = soundEngine.isSuspended();
-    setAudioLocked(stillLocked);
-    if (!stillLocked && isIntroPlaying) {
-      soundEngine.playCountdownBeep(true);
-      soundEngine.startRocketRumble();
-      soundEngine.playPopupChime();
-      soundEngine.speak(`${activeIntroPopup.headline}. ${activeIntroPopup.kidExplanation}`);
-    }
-  }, [isIntroPlaying, activeIntroPopup]);
-
-  useEffect(() => {
-    if (!audioLocked) return;
-    const onFirstGesture = () => {
-      soundEngine.unlock();
-      const locked = soundEngine.isSuspended();
-      setAudioLocked(locked);
-      if (!locked && isIntroPlaying) {
-        soundEngine.startRocketRumble();
-        soundEngine.playPopupChime();
-      }
-    };
-    window.addEventListener('pointerdown', onFirstGesture, { passive: true });
-    window.addEventListener('keydown', onFirstGesture, { passive: true });
-    return () => {
-      window.removeEventListener('pointerdown', onFirstGesture);
-      window.removeEventListener('keydown', onFirstGesture);
-    };
-  }, [audioLocked, isIntroPlaying]);
-
-  useEffect(() => {
-    if (!isIntroPlaying) {
-      soundEngine.stopRocketRumble();
-      lastIntroPopupIdRef.current = null;
-      return;
-    }
-    if (lastIntroPopupIdRef.current !== activeIntroPopup.id) {
-      lastIntroPopupIdRef.current = activeIntroPopup.id;
-      if (!soundEngine.isSuspended()) {
-        if (activeIntroPopup.stageIndex === 0) {
-          soundEngine.playCountdownBeep(true);
-          soundEngine.startRocketRumble();
-        } else {
-          soundEngine.playSpaceWhoosh();
-        }
-        soundEngine.playPopupChime();
-        soundEngine.speak(`${activeIntroPopup.headline}. ${activeIntroPopup.kidExplanation}`);
-      }
-    }
-  }, [isIntroPlaying, activeIntroPopup]);
 
   const startLevel = useCallback(
     (levelId: number, playIntro: boolean, overrideSite?: OutpostSiteId) => {
@@ -273,11 +210,7 @@ export default function App() {
       setShowLevelBrief(true);
 
       if (playIntro) {
-        setIntroRunId((n) => n + 1);
-        setIntroProgress(0);
-        setIntroTimeSec(0);
-        setIntroPaused(false);
-        lastIntroPopupIdRef.current = null;
+        setIntroAutostart(true);
         setIsIntroPlaying(true);
       } else {
         setIsIntroPlaying(false);
@@ -348,15 +281,14 @@ export default function App() {
     science,
   ]);
 
-  const handleIntroProgress = useCallback((progress: number, timeSec: number) => {
-    setIntroProgress(progress);
-    setIntroTimeSec(timeSec);
+  const handleSyncMuted = useCallback((nextMuted: boolean) => {
+    soundEngine.setMuted(nextMuted);
+    setMuted(nextMuted);
   }, []);
 
   const handleIntroFinished = useCallback(() => {
-    soundEngine.stopRocketRumble();
     soundEngine.playSuccess();
-    setIntroPaused(false);
+    setIntroAutostart(false);
     setIsIntroPlaying(false);
   }, []);
 
@@ -697,66 +629,58 @@ export default function App() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#070B14]">
-      <OutpostViewport
-        simSnapshot={viewportSnapshot}
-        introRunId={introRunId}
-        isIntroPlaying={isIntroPlaying}
-        introPaused={introPaused}
-        walkToTarget={walkToTarget}
-        onIntroProgress={handleIntroProgress}
-        onIntroFinished={handleIntroFinished}
-        onNearStationChange={setNearStationId}
-        onInteractStation={handleInteractStation}
-        onCollectSample={handleCollectSample}
-      />
-
-      {/* GTA-Style Top-Left Health/Air/Food/Rad/Power Bars & Top-Right Menu */}
-      <TopTelemetryBar
-        level={currentLevel}
-        levelGoalMet={levelGoalMet}
-        site={site}
-        activeAstronaut={activeAstronaut}
-        day={day}
-        maxDays={currentLevel.maxDays}
-        lifeSupport={lifeSupport}
-        food={food}
-        crewHealth={crewHealth}
-        radiationMsv={effectiveRadiationMsv}
-        powerFree={freePowerCells}
-        powerTotal={totalPowerCells}
-        isSolarStorm={isSolarStorm}
-        isDustStorm={isDustStorm}
-        muted={muted}
-        introPlaying={isIntroPlaying}
-        onOpenMenu={() => {
-          soundEngine.playClick(620);
-          setShowMenuModal(true);
-        }}
-        onOpenCrewSwitch={() => handleInteractStation('crew')}
-        onOpenNasaData={() => {
-          soundEngine.playClick(620);
-          setShowNasaModal(true);
-        }}
-        onToggleMute={() => {
-          const next = !muted;
-          soundEngine.setMuted(next);
-          setMuted(next);
-        }}
-        onAdvanceDay={handleAdvanceDay}
-      />
-
-      {/* Animated Rocket-to-Mars Intro Overlay */}
-      {isIntroPlaying && (
-        <IntroLaunchOverlay
-          site={site}
-          progress={introProgress}
-          activePopup={activeIntroPopup}
-          paused={introPaused}
-          audioLocked={audioLocked}
-          onUnlockAudio={handleUnlockAudio}
-          onTogglePause={() => setIntroPaused((p) => !p)}
-          onSkipIntro={handleIntroFinished}
+      {isIntroPlaying ? (
+        <IntroCutscene
+          autostart={introAutostart}
+          muted={muted}
+          onSyncMuted={handleSyncMuted}
+          onComplete={handleIntroFinished}
         />
+      ) : (
+        <>
+          <OutpostViewport
+            simSnapshot={viewportSnapshot}
+            walkToTarget={walkToTarget}
+            onNearStationChange={setNearStationId}
+            onInteractStation={handleInteractStation}
+            onCollectSample={handleCollectSample}
+          />
+
+          {/* GTA-Style Top-Left Health/Air/Food/Rad/Power Bars & Top-Right Menu */}
+          <TopTelemetryBar
+            level={currentLevel}
+            levelGoalMet={levelGoalMet}
+            site={site}
+            activeAstronaut={activeAstronaut}
+            day={day}
+            maxDays={currentLevel.maxDays}
+            lifeSupport={lifeSupport}
+            food={food}
+            crewHealth={crewHealth}
+            radiationMsv={effectiveRadiationMsv}
+            powerFree={freePowerCells}
+            powerTotal={totalPowerCells}
+            isSolarStorm={isSolarStorm}
+            isDustStorm={isDustStorm}
+            muted={muted}
+            introPlaying={false}
+            onOpenMenu={() => {
+              soundEngine.playClick(620);
+              setShowMenuModal(true);
+            }}
+            onOpenCrewSwitch={() => handleInteractStation('crew')}
+            onOpenNasaData={() => {
+              soundEngine.playClick(620);
+              setShowNasaModal(true);
+            }}
+            onToggleMute={() => {
+              const next = !muted;
+              soundEngine.setMuted(next);
+              setMuted(next);
+            }}
+            onAdvanceDay={handleAdvanceDay}
+          />
+        </>
       )}
 
       {/* Sample Crystal Toast */}

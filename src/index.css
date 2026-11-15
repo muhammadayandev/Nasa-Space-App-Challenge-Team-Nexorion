@@ -31,6 +31,11 @@
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
+
+  .font-mono-tech {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 /* Custom clean scrollbars inside modals */

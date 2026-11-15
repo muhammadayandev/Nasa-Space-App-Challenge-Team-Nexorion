@@ -475,62 +475,6 @@ export const ASTRONAUT_PROFILES: Record<AstronautId, AstronautProfile> = {
   },
 };
 
-export interface IntroPopupItem {
-  id: string;
-  stageIndex: number;
-  minTimeSec: number;
-  maxTimeSec: number;
-  badge: string;
-  emoji: string;
-  headline: string;
-  kidExplanation: string;
-  tradeOffPreview: string;
-  nasaSource: string;
-  accentHex: string;
-}
-
-export const INTRO_LAUNCH_POPUPS: IntroPopupItem[] = [
-  {
-    id: 'liftoff',
-    stageIndex: 0,
-    minTimeSec: 0,
-    maxTimeSec: 4.5,
-    badge: 'PART 1 · BLAST OFF!',
-    emoji: '🚀',
-    headline: '3, 2, 1... Bye Earth!',
-    kidExplanation: 'Hold on tight! Our rocket is blasting off straight for Mars!',
-    tradeOffPreview: 'We can only pack what fits inside the ship.',
-    nasaSource: 'Earth Launch',
-    accentHex: '#38bdf8',
-  },
-  {
-    id: 'deep-space',
-    stageIndex: 1,
-    minTimeSec: 4.5,
-    maxTimeSec: 9.5,
-    badge: 'PART 2 · CRUISING TO MARS',
-    emoji: '🌌',
-    headline: 'Zooming Through Space!',
-    kidExplanation: 'Earth is far behind us now. We make our own air and food on the way!',
-    tradeOffPreview: 'No stores in space, so we take care of every drop of water.',
-    nasaSource: 'Deep Space',
-    accentHex: '#a78bfa',
-  },
-  {
-    id: 'landing-outpost',
-    stageIndex: 2,
-    minTimeSec: 9.5,
-    maxTimeSec: 15.0,
-    badge: 'PART 3 · TOUCHDOWN!',
-    emoji: '🔴',
-    headline: 'We Made It to Mars!',
-    kidExplanation: 'Touchdown on the red dust! Ready to run our new Mars base?',
-    tradeOffPreview: 'Beat each level to unlock the next challenge!',
-    nasaSource: 'Mars Base',
-    accentHex: '#10b981',
-  },
-];
-
 export interface FieldSampleNode {
   id: string;
   name: string;

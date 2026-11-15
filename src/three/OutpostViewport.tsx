@@ -34,12 +34,7 @@ export interface ViewportSimSnapshot {
 
 interface OutpostViewportProps {
   simSnapshot: ViewportSimSnapshot;
-  introRunId: number;
-  isIntroPlaying: boolean;
-  introPaused: boolean;
   walkToTarget: { x: number; z: number; seq: number } | null;
-  onIntroProgress: (progress: number, timeSec: number) => void;
-  onIntroFinished: () => void;
   onNearStationChange: (stationId: Exclude<ModuleId, 'overview'> | null) => void;
   onInteractStation: (stationId: Exclude<ModuleId, 'overview'>) => void;
   onCollectSample: (sampleId: string) => void;
@@ -85,25 +80,15 @@ const ROCK_SEEDS: Array<{ x: number; z: number; s: number; ry: number; rx: numbe
 
 export const OutpostViewport: React.FC<OutpostViewportProps> = ({
   simSnapshot,
-  introRunId,
-  isIntroPlaying,
-  introPaused,
   walkToTarget,
-  onIntroProgress,
-  onIntroFinished,
   onNearStationChange,
   onInteractStation,
   onCollectSample,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const simRef = useRef<ViewportSimSnapshot>(simSnapshot);
-  const isIntroRef = useRef<boolean>(isIntroPlaying);
-  const introPausedRef = useRef<boolean>(introPaused);
-  const introTimerRef = useRef<number>(0);
   const onNearRef = useRef(onNearStationChange);
   const onInteractRef = useRef(onInteractStation);
-  const onIntroProgressRef = useRef(onIntroProgress);
-  const onIntroFinishedRef = useRef(onIntroFinished);
   const onCollectSampleRef = useRef(onCollectSample);
   const clickWalkTargetRef = useRef<{ x: number; z: number } | null>(null);
   const cameraAnimatingRef = useRef<boolean>(true);
@@ -123,15 +108,8 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
   }, [simSnapshot]);
 
   useEffect(() => {
-    isIntroRef.current = isIntroPlaying;
-    if (!isIntroPlaying) {
-      cameraAnimatingRef.current = true;
-    }
-  }, [isIntroPlaying]);
-
-  useEffect(() => {
-    introPausedRef.current = introPaused;
-  }, [introPaused]);
+    simRef.current = simSnapshot;
+  }, [simSnapshot]);
 
   useEffect(() => {
     if (walkToTarget) {
@@ -139,9 +117,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     }
   }, [walkToTarget]);
 
-  useEffect(() => {
-    introTimerRef.current = 0;
-  }, [introRunId]);
+
 
   useEffect(() => {
     onNearRef.current = onNearStationChange;
@@ -151,13 +127,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     onInteractRef.current = onInteractStation;
   }, [onInteractStation]);
 
-  useEffect(() => {
-    onIntroProgressRef.current = onIntroProgress;
-  }, [onIntroProgress]);
 
-  useEffect(() => {
-    onIntroFinishedRef.current = onIntroFinished;
-  }, [onIntroFinished]);
 
   useEffect(() => {
     onCollectSampleRef.current = onCollectSample;
@@ -266,46 +236,6 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
 
     const textures = createProceduralTextures(renderer);
 
-    // DEEP SPACE TRANSIT STAGE
-    const transitGroup = new THREE.Group();
-    scene.add(transitGroup);
-
-    const earthMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(6.5, 36, 28),
-      new THREE.MeshStandardMaterial({
-        map: textures.earthGlobe,
-        roughness: 0.6,
-        metalness: 0.05,
-      })
-    );
-    earthMesh.position.set(-9, 1.5, -10);
-    transitGroup.add(earthMesh);
-
-    const earthAtmo = new THREE.Mesh(
-      new THREE.SphereGeometry(6.85, 32, 24),
-      new THREE.MeshBasicMaterial({
-        color: 0x38bdf8,
-        transparent: true,
-        opacity: 0.16,
-        side: THREE.BackSide,
-      })
-    );
-    earthAtmo.position.copy(earthMesh.position);
-    transitGroup.add(earthAtmo);
-
-    const targetSphereMat = new THREE.MeshStandardMaterial({
-      map: textures.moonGround,
-      roughness: 0.9,
-      metalness: 0.04,
-    });
-    const targetSphere = new THREE.Mesh(new THREE.SphereGeometry(6.2, 36, 28), targetSphereMat);
-    targetSphere.position.set(16, 2.8, -46);
-    transitGroup.add(targetSphere);
-
-    const transitShip = buildSpacecraft(textures, true);
-    transitShip.group.scale.setScalar(0.92);
-    transitGroup.add(transitShip.group);
-
     // OUTPOST SURFACE WORLD
     const surfaceGroup = new THREE.Group();
     scene.add(surfaceGroup);
@@ -411,9 +341,6 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       terrainGeo.computeVertexNormals();
 
       terrainMat.map = site === 'moon' ? textures.moonGround : textures.marsGround;
-      terrainMat.needsUpdate = true;
-      targetSphereMat.map = site === 'moon' ? textures.moonGround : textures.marsGround;
-      targetSphereMat.needsUpdate = true;
 
       Object.entries(handles.moduleGroups).forEach(([key, grp]) => {
         if (key !== 'crew') {
@@ -484,7 +411,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     const pressedKeys: Record<string, boolean> = {};
     const onKeyDown = (e: KeyboardEvent) => {
       pressedKeys[e.code] = true;
-      if ((e.code === 'KeyE' || e.code === 'Enter') && !isIntroRef.current && nearestRef.current) {
+      if ((e.code === 'KeyE' || e.code === 'Enter') && nearestRef.current) {
         onInteractRef.current(nearestRef.current);
       }
     };
@@ -512,7 +439,6 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
 
     const onPointerUp = (e: PointerEvent) => {
       isDraggingLook = false;
-      if (isIntroRef.current) return;
       const moved = Math.hypot(e.clientX - pointerDownXY.x, e.clientY - pointerDownXY.y);
       if (moved > 6) return;
       const rect = renderer.domElement.getBoundingClientRect();
@@ -548,7 +474,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (isDraggingLook && !isIntroRef.current && simRef.current.cameraMode === 'follow') {
+      if (isDraggingLook && simRef.current.cameraMode === 'follow') {
         const dx = e.clientX - prevDragXY.x;
         const dy = e.clientY - prevDragXY.y;
         prevDragXY = { x: e.clientX, y: e.clientY };
@@ -557,7 +483,6 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
         return;
       }
 
-      if (isIntroRef.current) return;
       const now = performance.now();
       if (now - lastHoverCheck < 50) return;
       lastHoverCheck = now;
@@ -577,7 +502,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     };
 
     const onWheel = (e: WheelEvent) => {
-      if (simRef.current.cameraMode === 'follow' && !isIntroRef.current) {
+      if (simRef.current.cameraMode === 'follow') {
         chaseDistance = THREE.MathUtils.clamp(chaseDistance + e.deltaY * 0.006, 4.2, 13.5);
       }
     };
@@ -636,113 +561,9 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       (handles.playerMarker.material as THREE.MeshBasicMaterial).color.setHex(astroProfile.suitColorHex);
 
       // ---------------------------------------------------------
-      // EARTH-TO-MARS DIRECT ROCKET JOURNEY (13.5s Lightweight Sequence)
+      // INTERACTIVE 3RD-PERSON PLAYER EXPLORATION MODE
       // ---------------------------------------------------------
-      if (isIntroRef.current) {
-        if (!introPausedRef.current) {
-          introTimerRef.current += delta;
-        }
-        const t = introTimerRef.current;
-        const totalIntroSec = 13.5;
-        const totalProg = THREE.MathUtils.clamp(t / totalIntroSec, 0, 1);
-        onIntroProgressRef.current(totalProg, t);
-
-        if (t < 9.5) {
-          transitGroup.visible = true;
-          surfaceGroup.visible = false;
-          scene.background = new THREE.Color(0x040711);
-          scene.fog = new THREE.FogExp2(0x040711, 0.003);
-          controls.enabled = false;
-
-          earthMesh.rotation.y += delta * 0.2;
-          targetSphere.rotation.y += delta * 0.24;
-
-          const p = THREE.MathUtils.clamp(t / 9.5, 0, 1);
-
-          // Direct smooth arc from Earth straight to Mars/Base
-          const shipX = THREE.MathUtils.lerp(-5.0, 12.5, p);
-          const shipY = THREE.MathUtils.lerp(2.0, 3.4, p) + Math.sin(p * Math.PI) * 2.0;
-          const shipZ = THREE.MathUtils.lerp(-5.5, -39.0, p);
-          transitShip.group.position.set(shipX, shipY, shipZ);
-          transitShip.group.rotation.set(0.32, -0.52, -0.66);
-
-          const flamePulse = 0.9 + Math.sin(elapsed * 28) * 0.25;
-          transitShip.thrusterFlame.scale.set(1.15, flamePulse * 1.3, 1.15);
-          (transitShip.thrusterFlame.material as THREE.MeshBasicMaterial).opacity = 0.92;
-
-          camera.position.set(shipX + 5.6 - p * 1.4, shipY + 2.4, shipZ + 8.6);
-
-          const lookX = THREE.MathUtils.lerp(earthMesh.position.x + 4, targetSphere.position.x, p);
-          const lookZ = THREE.MathUtils.lerp(earthMesh.position.z + 2, targetSphere.position.z + 4, p);
-          camera.lookAt(lookX, 2.8, lookZ);
-        } else if (t < totalIntroSec) {
-          transitGroup.visible = false;
-          surfaceGroup.visible = true;
-          const skyHex = s.site === 'moon' ? 0x060913 : 0x28130e;
-          scene.background = new THREE.Color(skyHex);
-          scene.fog = new THREE.FogExp2(skyHex, s.site === 'moon' ? 0.013 : 0.016);
-          controls.enabled = false;
-
-          const landT = THREE.MathUtils.clamp((t - 9.5) / 2.0, 0, 1);
-          const easeOut = 1 - Math.pow(1 - landT, 3);
-          const padY = handles.landingPadPos.y + 0.25;
-
-          handles.landedShip.group.position.set(
-            handles.landingPadPos.x,
-            THREE.MathUtils.lerp(padY + 22, padY, easeOut),
-            handles.landingPadPos.z
-          );
-          (handles.landedShip.thrusterFlame.material as THREE.MeshBasicMaterial).opacity =
-            landT < 0.95 ? 0.85 * (1 - landT * 0.6) : 0;
-          handles.landedShip.thrusterFlame.scale.setScalar(0.8 + Math.sin(elapsed * 30) * 0.15);
-
-          // Astronauts walk from landing pad to starting positions
-          const walkT = THREE.MathUtils.clamp((t - 11.4) / 2.0, 0, 1);
-          const allArrivalAstros = [handles.playerAstro, ...handles.npcAstronauts];
-          allArrivalAstros.forEach((astro, idx) => {
-            const startX = handles.landingPadPos.x - 1.2 + idx * 0.7;
-            const startZ = handles.landingPadPos.z + 2.2;
-            const ax = THREE.MathUtils.lerp(startX, astro.workPos.x, walkT);
-            const az = THREE.MathUtils.lerp(startZ, astro.workPos.y, walkT);
-            astro.group.position.set(ax, groundHeightAt(ax, az, s.site), az);
-            astro.group.rotation.y = Math.atan2(astro.workPos.x - startX, astro.workPos.y - startZ);
-            const swing = walkT > 0.05 && walkT < 0.98 ? Math.sin(elapsed * 8 + idx) * 0.45 : 0;
-            astro.leftLeg.rotation.x = swing;
-            astro.rightLeg.rotation.x = -swing;
-            astro.leftArm.rotation.x = -swing * 0.7;
-            astro.rightArm.rotation.x = swing * 0.7;
-          });
-
-          const camBlend = THREE.MathUtils.smoothstep(t, 11.4, totalIntroSec);
-          const pPos = handles.playerAstro.group.position;
-          const behindX = pPos.x + Math.sin(chaseYaw) * Math.cos(chasePitch) * chaseDistance;
-          const behindY = pPos.y + 1.5 + Math.sin(chasePitch) * chaseDistance;
-          const behindZ = pPos.z + Math.cos(chaseYaw) * Math.cos(chasePitch) * chaseDistance;
-
-          camera.position.set(
-            THREE.MathUtils.lerp(17.0, behindX, camBlend),
-            THREE.MathUtils.lerp(7.0, behindY, camBlend),
-            THREE.MathUtils.lerp(2.0, behindZ, camBlend)
-          );
-          _camTargetLook.set(
-            THREE.MathUtils.lerp(handles.landingPadPos.x - 1, pPos.x, camBlend),
-            THREE.MathUtils.lerp(padY + 2, pPos.y + 1.3, camBlend),
-            THREE.MathUtils.lerp(handles.landingPadPos.z + 1, pPos.z, camBlend)
-          );
-          camera.lookAt(_camTargetLook);
-        } else {
-          isIntroRef.current = false;
-          transitGroup.visible = false;
-          surfaceGroup.visible = true;
-          (handles.landedShip.thrusterFlame.material as THREE.MeshBasicMaterial).opacity = 0;
-          onIntroFinishedRef.current();
-        }
-      } else {
-        // ---------------------------------------------------------
-        // INTERACTIVE 3RD-PERSON PLAYER EXPLORATION MODE
-        // ---------------------------------------------------------
-        transitGroup.visible = false;
-        surfaceGroup.visible = true;
+      surfaceGroup.visible = true;
 
         const skyHex = s.site === 'moon' ? 0x060913 : 0x28130e;
         if (!(scene.background as THREE.Color)?.equals(new THREE.Color(skyHex))) {
@@ -990,7 +811,6 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
             s.site
           );
         });
-      }
 
       // Habitat radiation shutters & shield bubble
       const targetShutter = THREE.MathUtils.clamp(
@@ -1052,8 +872,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       }
 
       // Space Weather Storm Particles
-      const targetStorm =
-        !isIntroRef.current && s.isSolarStorm ? 1 : !isIntroRef.current && s.isDustStorm ? 0.65 : 0;
+      const targetStorm = s.isSolarStorm ? 1 : s.isDustStorm ? 0.65 : 0;
       stormStrength = THREE.MathUtils.damp(stormStrength, targetStorm, 2.5, delta);
       stormMat.opacity = stormStrength * 0.75;
       stormMat.color.setHex(s.isSolarStorm ? 0xfbbf24 : 0xfb923c);
@@ -1119,7 +938,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
         aria-label="Interactive 3D Lunar and Martian Outpost Viewport"
       />
 
-      {!isIntroPlaying && hoveredId && (
+      {hoveredId && (
         <div className="pointer-events-none fixed left-1/2 top-20 z-10 -translate-x-1/2 rounded-xl border border-sky-500/50 bg-[#0B1120]/95 px-3.5 py-1.5 text-xs font-semibold text-sky-200 shadow-lg">
           Click to interact: {MODULE_SPECS[hoveredId].name}
         </div>
