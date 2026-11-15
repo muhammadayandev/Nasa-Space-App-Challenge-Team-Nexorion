@@ -3,6 +3,9 @@ import * as THREE from 'three';
 export interface ProceduralTextureSet {
   moonGround: THREE.CanvasTexture;
   marsGround: THREE.CanvasTexture;
+  marsGroundBump: THREE.CanvasTexture;
+  marsRockMap: THREE.CanvasTexture;
+  marsRockBump: THREE.CanvasTexture;
   solarCell: THREE.CanvasTexture;
   hullPanels: THREE.CanvasTexture;
   contactShadow: THREE.CanvasTexture;
@@ -210,11 +213,118 @@ function createContactShadowTexture(): THREE.CanvasTexture {
   return new THREE.CanvasTexture(canvas);
 }
 
+function createCutsceneMarsTextures(maxAnisotropy: number): {
+  marsGround: THREE.CanvasTexture;
+  marsGroundBump: THREE.CanvasTexture;
+  marsRockMap: THREE.CanvasTexture;
+  marsRockBump: THREE.CanvasTexture;
+} {
+  // Exact Mars Iron-Oxide Regolith Color + Bump from cutscene materials.ts
+  const [marsC, marsCtx] = makeCanvas(512, 512);
+  const marsGrad = marsCtx.createLinearGradient(0, 0, 512, 512);
+  marsGrad.addColorStop(0, '#9c4527');
+  marsGrad.addColorStop(0.5, '#b2522f');
+  marsGrad.addColorStop(1, '#82371f');
+  marsCtx.fillStyle = marsGrad;
+  marsCtx.fillRect(0, 0, 512, 512);
+
+  for (let y = 0; y < 512; y += 8) {
+    marsCtx.fillStyle = y % 16 === 0 ? 'rgba(210, 112, 68, 0.16)' : 'rgba(65, 22, 12, 0.15)';
+    marsCtx.beginPath();
+    for (let x = 0; x <= 512; x += 16) {
+      const wave = Math.sin(x * 0.04 + y * 0.05) * 4;
+      if (x === 0) marsCtx.moveTo(x, y + wave);
+      else marsCtx.lineTo(x, y + wave);
+    }
+    marsCtx.lineTo(512, y + 6);
+    marsCtx.lineTo(0, y + 6);
+    marsCtx.closePath();
+    marsCtx.fill();
+  }
+  let seed = 4129;
+  const rand = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+  for (let i = 0; i < 3600; i++) {
+    const x = rand() * 512;
+    const y = rand() * 512;
+    marsCtx.fillStyle = rand() > 0.5 ? 'rgba(58, 28, 20, 0.35)' : 'rgba(218, 134, 90, 0.25)';
+    marsCtx.fillRect(x, y, 2 + rand() * 2, 2);
+  }
+  const marsGround = new THREE.CanvasTexture(marsC);
+  marsGround.colorSpace = THREE.SRGBColorSpace;
+  marsGround.wrapS = THREE.RepeatWrapping;
+  marsGround.wrapT = THREE.RepeatWrapping;
+  marsGround.repeat.set(20, 20);
+  marsGround.anisotropy = maxAnisotropy;
+
+  const [marsBC, marsBCtx] = makeCanvas(256, 256);
+  marsBCtx.fillStyle = '#808080';
+  marsBCtx.fillRect(0, 0, 256, 256);
+  for (let y = 0; y < 256; y += 6) {
+    marsBCtx.fillStyle = y % 12 === 0 ? '#a8a8a8' : '#606060';
+    marsBCtx.fillRect(0, y, 256, 3);
+  }
+  for (let i = 0; i < 2000; i++) {
+    const v = 70 + Math.floor(rand() * 115);
+    marsBCtx.fillStyle = `rgb(${v},${v},${v})`;
+    marsBCtx.fillRect(rand() * 256, rand() * 256, 2, 2);
+  }
+  const marsGroundBump = new THREE.CanvasTexture(marsBC);
+  marsGroundBump.colorSpace = THREE.NoColorSpace;
+  marsGroundBump.wrapS = THREE.RepeatWrapping;
+  marsGroundBump.wrapT = THREE.RepeatWrapping;
+  marsGroundBump.repeat.set(20, 20);
+  marsGroundBump.anisotropy = maxAnisotropy;
+
+  // Martian Sedimentary Rock Map & Bump matching cutscene rocks
+  const [rkC, rkCtx] = makeCanvas(256, 256);
+  const rkGrad = rkCtx.createLinearGradient(0, 0, 256, 256);
+  rkGrad.addColorStop(0, '#853a22');
+  rkGrad.addColorStop(0.5, '#9d482b');
+  rkGrad.addColorStop(1, '#682b18');
+  rkCtx.fillStyle = rkGrad;
+  rkCtx.fillRect(0, 0, 256, 256);
+  for (let y = 0; y < 256; y += 10) {
+    rkCtx.fillStyle = y % 20 === 0 ? 'rgba(196, 102, 62, 0.22)' : 'rgba(54, 20, 11, 0.24)';
+    rkCtx.fillRect(0, y, 256, 4);
+  }
+  for (let i = 0; i < 1800; i++) {
+    rkCtx.fillStyle = i % 3 === 0 ? 'rgba(52, 22, 14, 0.42)' : 'rgba(206, 120, 80, 0.25)';
+    rkCtx.fillRect((i * 73) % 256, (i * 139) % 256, 2 + (i % 3), 2);
+  }
+  const marsRockMap = new THREE.CanvasTexture(rkC);
+  marsRockMap.colorSpace = THREE.SRGBColorSpace;
+  marsRockMap.wrapS = THREE.RepeatWrapping;
+  marsRockMap.wrapT = THREE.RepeatWrapping;
+  marsRockMap.repeat.set(2, 2);
+  marsRockMap.anisotropy = maxAnisotropy;
+
+  const [rkBC, rkBCtx] = makeCanvas(256, 256);
+  rkBCtx.fillStyle = '#808080';
+  rkBCtx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2400; i++) {
+    const shade = 55 + ((i * 53) % 135);
+    rkBCtx.fillStyle = `rgb(${shade},${shade},${shade})`;
+    rkBCtx.fillRect((i * 97) % 256, (i * 61) % 256, 2 + (i % 4), 2 + (i % 3));
+  }
+  const marsRockBump = new THREE.CanvasTexture(rkBC);
+  marsRockBump.colorSpace = THREE.NoColorSpace;
+  marsRockBump.wrapS = THREE.RepeatWrapping;
+  marsRockBump.wrapT = THREE.RepeatWrapping;
+  marsRockBump.repeat.set(2, 2);
+  marsRockBump.anisotropy = maxAnisotropy;
+
+  return { marsGround, marsGroundBump, marsRockMap, marsRockBump };
+}
+
 export function createProceduralTextures(renderer: THREE.WebGLRenderer): ProceduralTextureSet {
   const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
   const moonGround = createGroundTexture('#6b7078', '#3c4047', '#9ba1ab', maxAnisotropy);
-  const marsGround = createGroundTexture('#9c4b2d', '#5e2916', '#c97149', maxAnisotropy);
+  const { marsGround, marsGroundBump, marsRockMap, marsRockBump } =
+    createCutsceneMarsTextures(maxAnisotropy);
   const solarCell = createSolarTexture(maxAnisotropy);
   const hullPanels = createHullPanelTexture(maxAnisotropy);
   const contactShadow = createContactShadowTexture();
@@ -223,6 +333,9 @@ export function createProceduralTextures(renderer: THREE.WebGLRenderer): Procedu
   return {
     moonGround,
     marsGround,
+    marsGroundBump,
+    marsRockMap,
+    marsRockBump,
     solarCell,
     hullPanels,
     contactShadow,
@@ -230,6 +343,9 @@ export function createProceduralTextures(renderer: THREE.WebGLRenderer): Procedu
     dispose: () => {
       moonGround.dispose();
       marsGround.dispose();
+      marsGroundBump.dispose();
+      marsRockMap.dispose();
+      marsRockBump.dispose();
       solarCell.dispose();
       hullPanels.dispose();
       contactShadow.dispose();

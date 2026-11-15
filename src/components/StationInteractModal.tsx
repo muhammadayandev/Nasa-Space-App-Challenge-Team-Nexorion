@@ -2,9 +2,11 @@ import React from 'react';
 import {
   ArrowRight,
   BatteryCharging,
+  DoorOpen,
   Droplets,
   FlaskConical,
   HeartPulse,
+  Pill,
   Radio,
   Shield,
   Sparkles,
@@ -36,11 +38,17 @@ interface StationInteractModalProps {
   crewHealth: number;
   science: number;
   solarDust: number;
+  isDustStorm: boolean;
+  inShelter: boolean;
   radiationMsv: number;
+  radiationPct: number;
+  medkits: number;
   totalPowerCells: number;
   powerAllocation: Record<PowerSystemKey, number>;
   onSetPower: (key: PowerSystemKey, level: number) => void;
   onStationAction: (actionId: string) => void;
+  onUseMedkit: () => void;
+  onEnterInterior: (spawn: 'inside_station' | 'inside_greenhouse') => void;
   onAdvanceDay: () => void;
   onClose: () => void;
 }
@@ -59,11 +67,17 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
   crewHealth,
   science,
   solarDust,
+  isDustStorm,
+  inShelter,
   radiationMsv,
+  radiationPct,
+  medkits,
   totalPowerCells,
   powerAllocation,
   onSetPower,
   onStationAction,
+  onUseMedkit,
+  onEnterInterior,
   onAdvanceDay,
   onClose,
 }) => {
@@ -119,8 +133,21 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
           {stationId === 'solar' && (
             <>
               <span className="font-semibold text-slate-300">Dust on Panels:</span>
-              <span className={solarDust >= 40 ? 'font-extrabold text-amber-400' : 'font-extrabold text-emerald-400'}>
-                {solarDust}% {solarDust >= 40 ? 'Clean me!' : 'Nice & Clean'}
+              <span
+                className={
+                  solarDust >= 65
+                    ? 'font-extrabold text-rose-400'
+                    : solarDust >= 40
+                    ? 'font-extrabold text-amber-400'
+                    : 'font-extrabold text-emerald-400'
+                }
+              >
+                {solarDust}%{' '}
+                {solarDust >= 65
+                  ? 'Blocked! Minimal Power!'
+                  : solarDust >= 40
+                  ? 'Clean me!'
+                  : 'Nice & Clean'}
               </span>
             </>
           )}
@@ -138,9 +165,25 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
           )}
           {stationId === 'habitat' && (
             <>
-              <span className="font-semibold text-slate-300">Sun Rays Outside:</span>
-              <span className={radiationMsv > 1.8 ? 'font-extrabold text-rose-400' : 'font-extrabold text-emerald-400'}>
-                {radiationMsv > 1.8 ? 'Danger! Raise Shield!' : 'Safe Inside'}
+              <span className="font-semibold text-slate-300">
+                {isDustStorm ? 'Dust Storm Shelter:' : 'Sun Rays Outside:'}
+              </span>
+              <span
+                className={
+                  isDustStorm
+                    ? 'font-extrabold text-emerald-400'
+                    : radiationMsv > 1.8
+                    ? 'font-extrabold text-rose-400'
+                    : 'font-extrabold text-emerald-400'
+                }
+              >
+                {isDustStorm
+                  ? inShelter
+                    ? 'Safe Inside Shelter!'
+                    : 'Safe Inside Station!'
+                  : radiationMsv > 1.8
+                  ? 'Danger! Raise Shield!'
+                  : 'Safe Inside'}
               </span>
             </>
           )}
@@ -229,10 +272,18 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
             <>
               <ActionButton
                 icon={<Wrench className="h-5 w-5 text-amber-400" />}
-                title="Sweep Solar Panels"
-                gain="Clean panels & +1 Power tomorrow"
+                title="Scrub & Clean Solar Panels"
+                gain={
+                  solarDust >= 65
+                    ? `Interactive Clean · Restores Full Power (${siteCfg.maxSolarCells}⚡)`
+                    : 'Interactive Scrub Clean & +1 Power Today'
+                }
                 cost={activeAstronaut === 'zara' ? '-4% Air & -5% Health' : '-8% Air & -5% Health'}
-                borderClass="border-amber-400/50 bg-amber-500/15 hover:bg-amber-500/25"
+                borderClass={
+                  solarDust >= 65
+                    ? 'border-amber-300 bg-amber-500/30 ring-2 ring-amber-400/60 hover:bg-amber-500/40'
+                    : 'border-amber-400/50 bg-amber-500/15 hover:bg-amber-500/25'
+                }
                 onClick={() => onStationAction('clean-solar')}
               />
               <ActionButton
@@ -269,9 +320,28 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
 
           {stationId === 'greenhouse' && (
             <>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onEnterInterior('inside_greenhouse');
+                }}
+                className="flex w-full items-center justify-between rounded-2xl border-2 border-emerald-400 bg-emerald-500/25 p-4 text-left ring-2 ring-emerald-400/50 hover:bg-emerald-500/35 transition-all"
+              >
+                <div>
+                  <p className="inline-flex items-center gap-2 font-display text-base font-extrabold text-white">
+                    <DoorOpen className="h-5 w-5 text-emerald-300" />
+                    <span>Enter Attached Greenhouse</span>
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-emerald-200">
+                    Walk inside to plant, water &amp; harvest realistic crops (or enter Station!)
+                  </p>
+                </div>
+                <ArrowRight className="h-5 w-5 text-white" />
+              </button>
               <ActionButton
                 icon={<Sprout className="h-5 w-5 text-emerald-400" />}
-                title="Pick Fresh Crops"
+                title="Quick Harvest Crops"
                 gain={activeAstronaut === 'leo' ? '+17% Food & +10% Health' : '+12% Food & +5% Health'}
                 cost="-9% Air/Water"
                 borderClass="border-emerald-400/50 bg-emerald-500/15 hover:bg-emerald-500/25"
@@ -321,18 +391,56 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
           )}
 
           {stationId === 'crew' && (
-            <ActionButton
-              icon={<HeartPulse className="h-5 w-5 text-emerald-400" />}
-              title="Snack & Rest Time"
-              gain="+12% Crew Health"
-              cost="-8% Food"
-              borderClass="border-emerald-400/50 bg-emerald-500/15 hover:bg-emerald-500/25"
-              onClick={() => onStationAction('crew-snack')}
-            />
+            <>
+              <ActionButton
+                icon={<HeartPulse className="h-5 w-5 text-emerald-400" />}
+                title="Snack & Rest Time"
+                gain="+12% Crew Health"
+                cost="-8% Food"
+                borderClass="border-emerald-400/50 bg-emerald-500/15 hover:bg-emerald-500/25"
+                onClick={() => onStationAction('crew-snack')}
+              />
+              <ActionButton
+                icon={<Pill className="h-5 w-5 text-rose-400" />}
+                title={`Use Anti-Rad Medkit (${medkits} left · Rad ${Math.round(radiationPct)}%)`}
+                gain="Cures -45% Radiation & +15% Health"
+                cost={medkits > 0 ? 'Uses 1 Medkit' : 'Craft more in Station Lab!'}
+                borderClass={
+                  medkits > 0
+                    ? 'border-rose-400/60 bg-rose-500/20 hover:bg-rose-500/30'
+                    : 'border-slate-700 bg-slate-900 opacity-50'
+                }
+                onClick={() => {
+                  if (medkits > 0) {
+                    onUseMedkit();
+                    onClose();
+                  }
+                }}
+              />
+            </>
           )}
 
           {stationId === 'habitat' && (
             <>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onEnterInterior('inside_station');
+                }}
+                className="flex w-full items-center justify-between rounded-2xl border-2 border-emerald-400 bg-emerald-500/25 p-4 text-left ring-2 ring-emerald-400/50 hover:bg-emerald-500/35 transition-all"
+              >
+                <div>
+                  <p className="inline-flex items-center gap-2 font-display text-base font-extrabold text-white">
+                    <DoorOpen className="h-5 w-5 text-emerald-300" />
+                    <span>Enter Inside Space Station</span>
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-emerald-200">
+                    Walk to Lab Desk, Gym, Body Scanner &amp; Attached Greenhouse!
+                  </p>
+                </div>
+                <ArrowRight className="h-5 w-5 text-white" />
+              </button>
               <ActionButton
                 icon={<Shield className="h-5 w-5 text-sky-400" />}
                 title="Turn On Water Shield"
@@ -343,15 +451,24 @@ export const StationInteractModal: React.FC<StationInteractModalProps> = ({
               />
               <button
                 type="button"
+                disabled={isDustStorm}
                 onClick={() => {
                   onClose();
                   onAdvanceDay();
                 }}
-                className="flex w-full items-center justify-between rounded-2xl border-b-4 border-amber-600 bg-amber-400 p-4 text-left text-slate-950 hover:bg-amber-300 active:translate-y-0.5 active:border-b-2 transition-all"
+                className={`flex w-full items-center justify-between rounded-2xl border-b-4 p-4 text-left transition-all ${
+                  isDustStorm
+                    ? 'cursor-not-allowed border-rose-800 bg-rose-950/70 text-rose-200'
+                    : 'border-amber-600 bg-amber-400 text-slate-950 hover:bg-amber-300 active:translate-y-0.5 active:border-b-2'
+                }`}
               >
                 <div>
                   <p className="font-display text-base font-extrabold">
-                    {day >= maxDays ? 'Finish This Level!' : `Go to Sleep (Start ${siteCfg.dayUnit} ${day + 1})`}
+                    {isDustStorm
+                      ? 'Wait Out Dust Storm in Shelter!'
+                      : day >= maxDays
+                      ? 'Finish This Level!'
+                      : `Go to Sleep (Start ${siteCfg.dayUnit} ${day + 1})`}
                   </p>
                 </div>
                 <ArrowRight className="h-5 w-5 shrink-0" />
@@ -392,7 +509,14 @@ const ActionButton: React.FC<ActionButtonProps> = ({
         <span>{title}</span>
       </p>
       <div className="mt-1 flex flex-wrap gap-3 text-xs font-bold">
-        <span className="text-emerald-400">+{gain}</span>
+        <span className="text-emerald-400">
+          {gain.startsWith('+') ||
+          gain.startsWith('Restores') ||
+          gain.startsWith('Cleans') ||
+          gain.startsWith('Blocks')
+            ? gain
+            : `+${gain}`}
+        </span>
         <span className="text-amber-300">{cost}</span>
       </div>
     </div>

@@ -1,9 +1,42 @@
+interface ChordStep {
+  padRoots: [number, number];
+  arpNotes: [number, number, number, number];
+}
+
+// Emotional minor-to-major progression (Am7 -> Fmaj7 -> C -> G6)
+// inspired by Undertale's 'Fallen Down' & Interstellar's main organ motif
+const AMBIENT_CHORDS: ChordStep[] = [
+  { padRoots: [110.0, 164.81], arpNotes: [440.0, 523.25, 659.25, 783.99] }, // Am7 (minor)
+  { padRoots: [87.31, 130.81], arpNotes: [349.23, 440.0, 523.25, 659.25] }, // Fmaj7 (emotional lift)
+  { padRoots: [130.81, 196.0], arpNotes: [523.25, 659.25, 783.99, 1046.5] }, // C major bloom
+  { padRoots: [98.0, 146.83], arpNotes: [392.0, 493.88, 587.33, 783.99] }, // G6 resolve
+];
+
+const ARP_PATTERN = [0, 1, 2, 3, 2, 1, 3, 2];
+
 class SoundEngine {
   private ctx: AudioContext | null = null;
   public muted = false;
   public voiceEnabled = true;
   private rumbleSource: AudioBufferSourceNode | null = null;
   private rumbleGain: GainNode | null = null;
+  private clipBufferCache = new Map<string, AudioBuffer>();
+  private missingClips = new Set<string>();
+  private activeVoiceNode: AudioBufferSourceNode | null = null;
+
+  // Ambient Retro Space Synthesizer State
+  private bgmRunning = false;
+  private bgmAlertActive = false;
+  private bgmMasterGain: GainNode | null = null;
+  private bgmPadFilter: BiquadFilterNode | null = null;
+  private bgmPadOscs: OscillatorNode[] = [];
+  private bgmSchedulerTimer: number | null = null;
+  private nextArpTime = 0;
+  private nextClockTime = 0;
+  private nextChordTime = 0;
+  private arpStepIdx = 0;
+  private chordStepIdx = 0;
+  private clockAccent = false;
 
   public isSuspended(): boolean {
     if (this.muted) return false;
@@ -11,7 +44,10 @@ class SoundEngine {
   }
 
   public unlock() {
-    this.ensureContext();
+    const ctx = this.ensureContext();
+    if (ctx && this.bgmRunning && !this.muted && this.bgmMasterGain) {
+      this.bgmMasterGain.gain.setTargetAtTime(0.95, ctx.currentTime, 0.25);
+    }
   }
 
   private ensureContext(): AudioContext | null {
@@ -31,12 +67,218 @@ class SoundEngine {
     return this.ctx;
   }
 
+  public startAmbientSpaceLoop(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    if (this.bgmRunning) {
+      if (this.bgmMasterGain) {
+        this.bgmMasterGain.gain.setTargetAtTime(0.95, ctx.currentTime, 0.3);
+      }
+      return;
+    }
+
+    try {
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0.0001, ctx.currentTime);
+      master.gain.linearRampToValueAtTime(0.95, ctx.currentTime + 1.4);
+      master.connect(ctx.destination);
+
+      // Slow, warm low-pass sawtooth organ pad (interstellar / pipe-organ warmth)
+      const padFilter = ctx.createBiquadFilter();
+      padFilter.type = 'lowpass';
+      padFilter.frequency.value = 340;
+      padFilter.Q.value = 0.65;
+
+      const padGain = ctx.createGain();
+      padGain.gain.value = 0.042;
+      padFilter.connect(padGain);
+      padGain.connect(master);
+
+      const chord0 = AMBIENT_CHORDS[0];
+      const padConfigs: Array<{ freq: number; detune: number; mix: number }> = [
+        { freq: chord0.padRoots[0], detune: -5, mix: 0.48 },
+        { freq: chord0.padRoots[0], detune: 5, mix: 0.48 },
+        { freq: chord0.padRoots[1], detune: 0, mix: 0.36 },
+      ];
+
+      const oscs: OscillatorNode[] = [];
+      for (const cfg of padConfigs) {
+        const osc = ctx.createOscillator();
+        const trim = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(cfg.freq, ctx.currentTime);
+        osc.detune.setValueAtTime(cfg.detune, ctx.currentTime);
+        trim.gain.value = cfg.mix;
+        osc.connect(trim);
+        trim.connect(padFilter);
+        osc.start();
+        oscs.push(osc);
+      }
+
+      const now = ctx.currentTime;
+      this.bgmMasterGain = master;
+      this.bgmPadFilter = padFilter;
+      this.bgmPadOscs = oscs;
+      this.bgmRunning = true;
+      this.chordStepIdx = 0;
+      this.arpStepIdx = 0;
+      this.clockAccent = false;
+      this.nextChordTime = now;
+      this.nextArpTime = now + 0.15;
+      this.nextClockTime = now + 0.05;
+
+      this.bgmSchedulerTimer = window.setInterval(() => {
+        this.scheduleAmbientTick();
+      }, 90);
+    } catch {
+      // Ignore Web Audio errors in headless environments
+    }
+  }
+
+  public setAmbientAlert(isAlert: boolean): void {
+    this.bgmAlertActive = isAlert;
+    if (this.ctx && this.bgmPadFilter) {
+      this.bgmPadFilter.frequency.setTargetAtTime(isAlert ? 460 : 340, this.ctx.currentTime, 0.4);
+    }
+  }
+
+  public stopAmbientSpaceLoop(): void {
+    this.bgmRunning = false;
+    if (this.bgmSchedulerTimer !== null) {
+      window.clearInterval(this.bgmSchedulerTimer);
+      this.bgmSchedulerTimer = null;
+    }
+    for (const osc of this.bgmPadOscs) {
+      try {
+        osc.stop();
+        osc.disconnect();
+      } catch {
+        // already stopped
+      }
+    }
+    this.bgmPadOscs = [];
+    if (this.bgmMasterGain) {
+      try {
+        this.bgmMasterGain.disconnect();
+      } catch {
+        // ignore
+      }
+      this.bgmMasterGain = null;
+    }
+    this.bgmPadFilter = null;
+  }
+
+  private scheduleAmbientTick(): void {
+    if (!this.bgmRunning || this.muted || !this.ctx || !this.bgmMasterGain) return;
+    if (this.ctx.state !== 'running') return;
+
+    const now = this.ctx.currentTime;
+    if (this.nextArpTime < now - 0.5) {
+      this.nextChordTime = now;
+      this.nextArpTime = now + 0.08;
+      this.nextClockTime = now + 0.05;
+    }
+    const lookahead = now + 0.28;
+
+    // 1. Slow emotional chord changes (every 4.0 seconds)
+    while (this.nextChordTime < lookahead) {
+      const chord = AMBIENT_CHORDS[this.chordStepIdx % AMBIENT_CHORDS.length];
+      if (this.bgmPadOscs.length >= 3) {
+        this.bgmPadOscs[0].frequency.setTargetAtTime(chord.padRoots[0], this.nextChordTime, 0.65);
+        this.bgmPadOscs[1].frequency.setTargetAtTime(chord.padRoots[0], this.nextChordTime, 0.65);
+        this.bgmPadOscs[2].frequency.setTargetAtTime(chord.padRoots[1], this.nextChordTime, 0.65);
+      }
+      this.chordStepIdx = (this.chordStepIdx + 1) % AMBIENT_CHORDS.length;
+      this.nextChordTime += 4.0;
+    }
+
+    // 2. Gentle 16-bit triangle-wave music-box arpeggio (faster when storm/flare active)
+    const arpInterval = this.bgmAlertActive ? 0.27 : 0.42;
+    while (this.nextArpTime < lookahead) {
+      const chordIdx = (this.chordStepIdx - 1 + AMBIENT_CHORDS.length) % AMBIENT_CHORDS.length;
+      const chord = AMBIENT_CHORDS[chordIdx];
+      const noteIdx = ARP_PATTERN[this.arpStepIdx % ARP_PATTERN.length];
+      const freq = chord.arpNotes[noteIdx];
+      this.triggerMusicBoxNote(this.nextArpTime, freq, this.bgmAlertActive ? 0.34 : 0.48);
+      this.arpStepIdx = (this.arpStepIdx + 1) % ARP_PATTERN.length;
+      this.nextArpTime += arpInterval;
+    }
+
+    // 3. Soft, faint Interstellar clock-tick pulse every 1.0 second
+    while (this.nextClockTime < lookahead) {
+      this.triggerClockPulse(this.nextClockTime, this.clockAccent);
+      this.clockAccent = !this.clockAccent;
+      this.nextClockTime += 1.0;
+    }
+  }
+
+  private triggerMusicBoxNote(atTime: number, freq: number, durSec: number): void {
+    if (!this.ctx || !this.bgmMasterGain) return;
+    const osc = this.ctx.createOscillator();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, atTime);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(this.bgmAlertActive ? 2200 : 1650, atTime);
+
+    gain.gain.setValueAtTime(0.0001, atTime);
+    gain.gain.linearRampToValueAtTime(this.bgmAlertActive ? 0.036 : 0.03, atTime + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, atTime + durSec);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.bgmMasterGain);
+    osc.start(atTime);
+    osc.stop(atTime + durSec + 0.04);
+  }
+
+  private triggerClockPulse(atTime: number, accent: boolean): void {
+    if (!this.ctx || !this.bgmMasterGain) return;
+    const osc = this.ctx.createOscillator();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(accent ? 1520 : 1180, atTime);
+    osc.frequency.exponentialRampToValueAtTime(accent ? 540 : 420, atTime + 0.025);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(accent ? 1600 : 1250, atTime);
+    filter.Q.value = 1.8;
+
+    gain.gain.setValueAtTime(0.0001, atTime);
+    gain.gain.linearRampToValueAtTime(accent ? 0.016 : 0.011, atTime + 0.003);
+    gain.gain.exponentialRampToValueAtTime(0.0001, atTime + 0.032);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.bgmMasterGain);
+    osc.start(atTime);
+    osc.stop(atTime + 0.045);
+  }
+
   public setMuted(nextMuted: boolean) {
     this.muted = nextMuted;
     if (nextMuted) {
       this.stopRocketRumble();
+      if (this.bgmMasterGain && this.ctx) {
+        this.bgmMasterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.06);
+      }
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.cancel();
+      }
+    } else if (this.bgmRunning) {
+      const ctx = this.ensureContext();
+      if (ctx && this.bgmMasterGain) {
+        this.bgmMasterGain.gain.setTargetAtTime(0.95, ctx.currentTime, 0.25);
+        this.nextArpTime = ctx.currentTime + 0.12;
+        this.nextClockTime = ctx.currentTime + 0.1;
+        this.nextChordTime = ctx.currentTime + 0.2;
       }
     }
   }
@@ -54,26 +296,71 @@ class SoundEngine {
     }
     try {
       window.speechSynthesis.cancel();
-      const clean = text.replace(/[^\w\s.,!?%-]/g, ' ');
+      const clean = text.replace(/[^\w\s.,!?%-]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!clean) return;
       const utter = new SpeechSynthesisUtterance(clean);
-      utter.rate = 1.03;
-      utter.pitch = 1.08;
-      utter.volume = 0.85;
       const voices = window.speechSynthesis.getVoices();
-      const friendly =
-        voices.find(
-          (v) =>
-            v.lang.startsWith('en') &&
-            (v.name.includes('Natural') ||
-              v.name.includes('Google') ||
-              v.name.includes('Samantha') ||
-              v.name.includes('Zira'))
-        ) || voices.find((v) => v.lang.startsWith('en'));
-      if (friendly) utter.voice = friendly;
+      const english = voices.filter((v) => v.lang.toLowerCase().startsWith('en'));
+      const preferred =
+        english.find((v) => /online|natural|neural/i.test(v.name) && /andrew|guy|ryan|aria|jenny|brian/i.test(v.name)) ||
+        english.find((v) => /online|natural|neural|google/i.test(v.name)) ||
+        english.find((v) => /david|mark|george|daniel|samantha/i.test(v.name)) ||
+        english[0];
+      if (preferred) utter.voice = preferred;
+      utter.rate = 0.98;
+      utter.pitch = 0.96;
+      utter.volume = 0.88;
       window.speechSynthesis.speak(utter);
     } catch {
       // Ignore speech synthesis errors on restricted browsers
     }
+  }
+
+  public async playVoiceClip(clipId: string, fallbackText: string): Promise<void> {
+    if (this.muted || !this.voiceEnabled) return;
+    const url = `/audio/voiceovers/${clipId}.mp3`;
+    const ctx = this.ensureContext();
+
+    if (ctx && !this.missingClips.has(url)) {
+      try {
+        let buffer = this.clipBufferCache.get(url);
+        if (!buffer) {
+          const res = await fetch(url);
+          const ctype = res.headers.get('content-type') || '';
+          if (!res.ok || ctype.includes('text/html')) {
+            this.missingClips.add(url);
+            this.speak(fallbackText);
+            return;
+          }
+          const arr = await res.arrayBuffer();
+          if (arr.byteLength < 128) {
+            this.missingClips.add(url);
+            this.speak(fallbackText);
+            return;
+          }
+          buffer = await ctx.decodeAudioData(arr);
+          this.clipBufferCache.set(url, buffer);
+        }
+
+        if (this.activeVoiceNode) {
+          try {
+            this.activeVoiceNode.stop();
+          } catch {
+            // ignore
+          }
+        }
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        src.connect(ctx.destination);
+        src.start();
+        this.activeVoiceNode = src;
+        return;
+      } catch {
+        this.missingClips.add(url);
+      }
+    }
+
+    this.speak(fallbackText);
   }
 
   public playClick(pitch = 580) {

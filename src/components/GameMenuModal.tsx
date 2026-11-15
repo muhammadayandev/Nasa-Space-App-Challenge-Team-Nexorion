@@ -16,6 +16,8 @@ import {
 } from '../data/missionScenarios';
 
 interface GameMenuModalProps {
+  gameMode: 'tutorial' | 'survival';
+  unlockedSurvival: boolean;
   currentLevelId: number;
   unlockedLevel: number;
   completedLevels: number[];
@@ -24,6 +26,7 @@ interface GameMenuModalProps {
   muted: boolean;
   voiceEnabled: boolean;
   onSelectLevel: (levelId: number) => void;
+  onStartSurvival: () => void;
   onSelectSite: (site: OutpostSiteId) => void;
   onSelectAstronaut: (id: AstronautId) => void;
   onToggleMute: () => void;
@@ -33,6 +36,8 @@ interface GameMenuModalProps {
 }
 
 export const GameMenuModal: React.FC<GameMenuModalProps> = ({
+  gameMode,
+  unlockedSurvival,
   currentLevelId,
   unlockedLevel,
   completedLevels,
@@ -41,6 +46,7 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
   muted,
   voiceEnabled,
   onSelectLevel,
+  onStartSurvival,
   onSelectSite,
   onSelectAstronaut,
   onToggleMute,
@@ -67,7 +73,7 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
                 Game Menu
               </h2>
               <p className="text-xs font-semibold text-slate-400">
-                Pass each level to unlock the next!
+                Pass Tutorials 1–5 to unlock 150-Day Open-World Survival!
               </p>
             </div>
           </div>
@@ -82,12 +88,15 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
           </button>
         </div>
 
-        {/* Levels Grid */}
-        <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+        {/* Tutorial Levels Grid */}
+        <p className="mt-4 text-xs font-extrabold uppercase tracking-wider text-amber-400">
+          Tutorial Levels (1–5)
+        </p>
+        <div className="mt-2 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {GAME_LEVELS.map((lvl) => {
             const isUnlocked = lvl.id <= unlockedLevel;
             const isDone = completedLevels.includes(lvl.id);
-            const isCurrent = lvl.id === currentLevelId;
+            const isCurrent = gameMode === 'tutorial' && lvl.id === currentLevelId;
 
             return (
               <button
@@ -110,7 +119,7 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-display text-sm font-extrabold text-white">
-                      Level {lvl.id}: {lvl.title}
+                      Tutorial {lvl.id}: {lvl.title}
                     </span>
                     {isDone ? (
                       <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
@@ -124,6 +133,44 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
             );
           })}
         </div>
+
+        {/* 150-Day Open-World Survival Card */}
+        <p className="mt-5 text-xs font-extrabold uppercase tracking-wider text-cyan-400">
+          Open-World Survival Mode
+        </p>
+        <button
+          type="button"
+          disabled={!unlockedSurvival}
+          onClick={onStartSurvival}
+          className={`mt-2 flex w-full items-center gap-3.5 rounded-2xl border-2 p-4 text-left transition-all ${
+            gameMode === 'survival'
+              ? 'border-cyan-400 bg-cyan-500/20'
+              : unlockedSurvival
+              ? 'border-emerald-400/60 bg-emerald-500/10 hover:border-cyan-400'
+              : 'border-slate-800 bg-slate-950/60 opacity-60 cursor-not-allowed'
+          }`}
+        >
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-800 text-2xl">
+            {unlockedSurvival ? '🛰️' : <Lock className="h-5 w-5 text-slate-500" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-display text-base font-extrabold text-white">
+                150-Day Mars Open-World Survival
+              </span>
+              {unlockedSurvival && (
+                <span className="rounded-full bg-cyan-400 px-2.5 py-0.5 text-[11px] font-extrabold text-slate-950">
+                  {gameMode === 'survival' ? 'Active' : 'Play Open World'}
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-slate-300">
+              {unlockedSurvival
+                ? 'Farm Greenhouse food, exercise & run Body Scans, fix Earth Comms in the Lab, clean the Solar Farm & survive 150 Sols for rescue!'
+                : 'Pass Tutorial Level 5 to unlock 150-Day Open-World Survival.'}
+            </p>
+          </div>
+        </button>
 
         {/* Astronaut Picker */}
         <p className="mt-5 text-xs font-extrabold uppercase tracking-wider text-sky-400">

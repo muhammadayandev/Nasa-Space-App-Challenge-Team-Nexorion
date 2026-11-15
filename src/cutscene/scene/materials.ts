@@ -5,6 +5,8 @@ export interface ProceduralTextureSet {
   concreteBump: THREE.CanvasTexture;
   marsSoilMap: THREE.CanvasTexture;
   marsSoilBump: THREE.CanvasTexture;
+  marsRockMap: THREE.CanvasTexture;
+  marsRockBump: THREE.CanvasTexture;
   hullPanelMap: THREE.CanvasTexture;
   solarCellMap: THREE.CanvasTexture;
   earthGlobeMap: THREE.CanvasTexture;
@@ -421,11 +423,43 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   marsGCtx.putImageData(marsImg, 0, 0);
   const marsGlobeMap = configureTexture(marsGC, true, maxAnisotropy, 1, 1);
 
+  // 7. Martian Sedimentary Basalt-Iron-Oxide Rock Texture & Bump
+  const [rkC, rkCtx] = makeCanvas(256, 256);
+  const rkGrad = rkCtx.createLinearGradient(0, 0, 256, 256);
+  rkGrad.addColorStop(0, '#853a22');
+  rkGrad.addColorStop(0.5, '#9d482b');
+  rkGrad.addColorStop(1, '#682b18');
+  rkCtx.fillStyle = rkGrad;
+  rkCtx.fillRect(0, 0, 256, 256);
+  for (let y = 0; y < 256; y += 10) {
+    rkCtx.fillStyle = y % 20 === 0 ? 'rgba(196, 102, 62, 0.22)' : 'rgba(54, 20, 11, 0.24)';
+    rkCtx.fillRect(0, y, 256, 4);
+  }
+  for (let i = 0; i < 1800; i++) {
+    const rx = (i * 73) % 256;
+    const ry = (i * 139) % 256;
+    rkCtx.fillStyle = i % 3 === 0 ? 'rgba(52, 22, 14, 0.42)' : 'rgba(206, 120, 80, 0.25)';
+    rkCtx.fillRect(rx, ry, 2 + (i % 3), 2);
+  }
+  const marsRockMap = configureTexture(rkC, true, maxAnisotropy, 2, 2);
+
+  const [rkBC, rkBCtx] = makeCanvas(256, 256);
+  rkBCtx.fillStyle = '#808080';
+  rkBCtx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2400; i++) {
+    const shade = 55 + ((i * 53) % 135);
+    rkBCtx.fillStyle = `rgb(${shade},${shade},${shade})`;
+    rkBCtx.fillRect((i * 97) % 256, (i * 61) % 256, 2 + (i % 4), 2 + (i % 3));
+  }
+  const marsRockBump = configureTexture(rkBC, false, maxAnisotropy, 2, 2);
+
   return {
     concreteMap,
     concreteBump,
     marsSoilMap,
     marsSoilBump,
+    marsRockMap,
+    marsRockBump,
     hullPanelMap,
     solarCellMap,
     earthGlobeMap,
@@ -436,6 +470,8 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
       concreteBump.dispose();
       marsSoilMap.dispose();
       marsSoilBump.dispose();
+      marsRockMap.dispose();
+      marsRockBump.dispose();
       hullPanelMap.dispose();
       solarCellMap.dispose();
       earthGlobeMap.dispose();

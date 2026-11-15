@@ -6,14 +6,20 @@ import { soundEngine } from '../audio/soundEngine';
 import {
   ASTRONAUT_PROFILES,
   AstronautId,
+  CropPlotState,
   FIELD_SAMPLES,
+  INTERIOR_POINTS,
+  InteriorZoneId,
   MODULE_SPECS,
   ModuleId,
   OutpostSiteId,
   PowerSystemKey,
   STATION_POINTS,
 } from '../data/missionScenarios';
-import { buildOutpostModules, buildSpacecraft, groundHeightAt, OutpostDynamicHandles } from './models';
+import { poseAstronautWalk, type AstronautRig } from '../cutscene/scene/models';
+import { applyCropStageToBeds } from './cropVisuals';
+import { buildInteriorWorld, type InteriorWorldHandles } from './interiorModels';
+import { buildOutpostModules, groundHeightAt, OutpostDynamicHandles } from './models';
 import { createProceduralTextures } from './textures';
 
 export interface ViewportSimSnapshot {
@@ -24,19 +30,36 @@ export interface ViewportSimSnapshot {
   powerAllocation: Record<PowerSystemKey, number>;
   isSolarStorm: boolean;
   isDustStorm: boolean;
+  solarDust: number;
   crewHealth: number;
   food: number;
   lifeSupport: number;
   shieldLevel: number;
   cameraMode: 'follow' | 'overview';
   walkSpeed: 'normal' | 'fast';
+  worldLocation: 'outside' | 'inside';
+  cropPlots: CropPlotState[];
+  commsRepaired: boolean;
+  scanningActive: boolean;
+  rescueArrived: boolean;
 }
+
+export type SpawnAnchorType =
+  | 'inside_station'
+  | 'inside_greenhouse'
+  | 'outside_station'
+  | 'outside_greenhouse';
 
 interface OutpostViewportProps {
   simSnapshot: ViewportSimSnapshot;
   walkToTarget: { x: number; z: number; seq: number } | null;
+  interiorWalkTarget: { x: number; z: number; seq: number } | null;
+  spawnAnchor: { type: SpawnAnchorType; seq: number } | null;
   onNearStationChange: (stationId: Exclude<ModuleId, 'overview'> | null) => void;
+  onNearInteriorChange: (zoneId: InteriorZoneId | null) => void;
+  onShelterChange: (inShelter: boolean) => void;
   onInteractStation: (stationId: Exclude<ModuleId, 'overview'>) => void;
+  onInteractInterior: (zoneId: InteriorZoneId) => void;
   onCollectSample: (sampleId: string) => void;
 }
 
@@ -45,16 +68,39 @@ const _camTargetLook = new THREE.Vector3();
 const _mouseVec = new THREE.Vector2();
 const _tmpColor = new THREE.Color();
 const _rockDummy = new THREE.Object3D();
+const _floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _floorHit = new THREE.Vector3();
+
+function dampRigToIdle(rig: AstronautRig, delta: number): void {
+  const k = 10;
+  rig.pelvis.position.y = THREE.MathUtils.damp(rig.pelvis.position.y, 0.92, k, delta);
+  rig.pelvis.rotation.z = THREE.MathUtils.damp(rig.pelvis.rotation.z, 0, k, delta);
+  rig.pelvis.rotation.y = THREE.MathUtils.damp(rig.pelvis.rotation.y, 0, k, delta);
+  rig.spine.rotation.x = THREE.MathUtils.damp(rig.spine.rotation.x, 0, k, delta);
+  rig.spine.rotation.y = THREE.MathUtils.damp(rig.spine.rotation.y, 0, k, delta);
+  rig.leftHip.rotation.x = THREE.MathUtils.damp(rig.leftHip.rotation.x, 0, k, delta);
+  rig.rightHip.rotation.x = THREE.MathUtils.damp(rig.rightHip.rotation.x, 0, k, delta);
+  rig.leftKnee.rotation.x = THREE.MathUtils.damp(rig.leftKnee.rotation.x, 0.05, k, delta);
+  rig.rightKnee.rotation.x = THREE.MathUtils.damp(rig.rightKnee.rotation.x, 0.05, k, delta);
+  rig.leftAnkle.rotation.x = THREE.MathUtils.damp(rig.leftAnkle.rotation.x, 0, k, delta);
+  rig.rightAnkle.rotation.x = THREE.MathUtils.damp(rig.rightAnkle.rotation.x, 0, k, delta);
+  rig.leftShoulder.rotation.x = THREE.MathUtils.damp(rig.leftShoulder.rotation.x, 0, k, delta);
+  rig.rightShoulder.rotation.x = THREE.MathUtils.damp(rig.rightShoulder.rotation.x, 0, k, delta);
+  rig.leftShoulder.rotation.z = THREE.MathUtils.damp(rig.leftShoulder.rotation.z, 0.14, k, delta);
+  rig.rightShoulder.rotation.z = THREE.MathUtils.damp(rig.rightShoulder.rotation.z, -0.14, k, delta);
+  rig.leftElbow.rotation.x = THREE.MathUtils.damp(rig.leftElbow.rotation.x, -0.15, k, delta);
+  rig.rightElbow.rotation.x = THREE.MathUtils.damp(rig.rightElbow.rotation.x, -0.15, k, delta);
+}
 
 const CAMERA_PRESETS: Record<ModuleId, { pos: [number, number, number]; look: [number, number, number] }> = {
-  overview: { pos: [14.8, 11.2, 16.8], look: [0.5, 1.0, 0.0] },
-  crew: { pos: [6.8, 4.2, 8.6], look: [2.2, 1.0, 3.5] },
-  habitat: { pos: [6.8, 5.2, 8.2], look: [0, 2.1, 0] },
-  solar: { pos: [-14.0, 5.4, 3.8], look: [-7.6, 1.5, -3.2] },
-  greenhouse: { pos: [13.2, 4.6, 6.4], look: [7.2, 1.2, 0] },
-  lifesupport: { pos: [-9.8, 4.5, 11.2], look: [-4.2, 1.3, 5.8] },
-  comms: { pos: [8.8, 5.8, -12.6], look: [3.2, 2.4, -6.8] },
-  science: { pos: [10.4, 4.0, 11.6], look: [4.8, 0.9, 6.2] },
+  overview: { pos: [26, 20, 32], look: [0, 2.0, 0] },
+  crew: { pos: [8, 5, 16], look: [0, 1.5, 9] },
+  habitat: { pos: [14, 10, 18], look: [0, 3.2, 0] },
+  solar: { pos: [-30, 8.5, 0], look: [-21.5, 1.8, -10.0] },
+  greenhouse: { pos: [24, 6.5, 11], look: [15.8, 1.6, 0.0] },
+  lifesupport: { pos: [-22, 6.5, 25], look: [-14.0, 1.6, 17.5] },
+  comms: { pos: [20, 7.5, -27], look: [12.0, 2.5, -19.0] },
+  science: { pos: [22, 5.5, 25], look: [14.5, 1.2, 18.0] },
 };
 
 const ROCK_SEEDS: Array<{ x: number; z: number; s: number; ry: number; rx: number }> = (() => {
@@ -62,15 +108,15 @@ const ROCK_SEEDS: Array<{ x: number; z: number; s: number; ry: number; rx: numbe
   let s = 918273;
   const rand = () => {
     s = (s * 16807) % 2147483647;
-    return (s - 1) / 2147483646;
+    return (seedVal => seedVal)(s - 1) / 2147483646;
   };
-  for (let i = 0; i < 64; i++) {
+  for (let i = 0; i < 130; i++) {
     const angle = rand() * Math.PI * 2;
-    const dist = 12.6 + rand() * 34;
+    const dist = 29.0 + rand() * 52;
     arr.push({
       x: Math.cos(angle) * dist,
       z: Math.sin(angle) * dist,
-      s: 0.45 + rand() * 1.45,
+      s: 0.6 + rand() * 1.9,
       ry: rand() * Math.PI * 2,
       rx: rand() * 0.4,
     });
@@ -81,23 +127,36 @@ const ROCK_SEEDS: Array<{ x: number; z: number; s: number; ry: number; rx: numbe
 export const OutpostViewport: React.FC<OutpostViewportProps> = ({
   simSnapshot,
   walkToTarget,
+  interiorWalkTarget,
+  spawnAnchor,
   onNearStationChange,
+  onNearInteriorChange,
+  onShelterChange,
   onInteractStation,
+  onInteractInterior,
   onCollectSample,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const simRef = useRef<ViewportSimSnapshot>(simSnapshot);
   const onNearRef = useRef(onNearStationChange);
+  const onNearInteriorRef = useRef(onNearInteriorChange);
+  const onShelterRef = useRef(onShelterChange);
   const onInteractRef = useRef(onInteractStation);
+  const onInteractInteriorRef = useRef(onInteractInterior);
   const onCollectSampleRef = useRef(onCollectSample);
   const clickWalkTargetRef = useRef<{ x: number; z: number } | null>(null);
+  const interiorWalkTargetRef = useRef<{ x: number; z: number } | null>(null);
+  const pendingSpawnRef = useRef<SpawnAnchorType | null>(null);
   const cameraAnimatingRef = useRef<boolean>(true);
   const prevPresetRef = useRef<ModuleId>('overview');
   const applySiteThemeRef = useRef<((site: OutpostSiteId) => void) | null>(null);
   const nearestRef = useRef<Exclude<ModuleId, 'overview'> | null>(null);
+  const nearestInteriorRef = useRef<InteriorZoneId | null>(null);
+  const inShelterRef = useRef<boolean>(false);
 
   const [webglError, setWebglError] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<Exclude<ModuleId, 'overview'> | null>(null);
+  const [hoveredInteriorId, setHoveredInteriorId] = useState<InteriorZoneId | null>(null);
 
   useEffect(() => {
     simRef.current = simSnapshot;
@@ -108,26 +167,42 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
   }, [simSnapshot]);
 
   useEffect(() => {
-    simRef.current = simSnapshot;
-  }, [simSnapshot]);
-
-  useEffect(() => {
     if (walkToTarget) {
       clickWalkTargetRef.current = { x: walkToTarget.x, z: walkToTarget.z };
     }
   }, [walkToTarget]);
 
+  useEffect(() => {
+    if (interiorWalkTarget) {
+      interiorWalkTargetRef.current = { x: interiorWalkTarget.x, z: interiorWalkTarget.z };
+    }
+  }, [interiorWalkTarget]);
 
+  useEffect(() => {
+    if (spawnAnchor) {
+      pendingSpawnRef.current = spawnAnchor.type;
+    }
+  }, [spawnAnchor]);
 
   useEffect(() => {
     onNearRef.current = onNearStationChange;
   }, [onNearStationChange]);
 
   useEffect(() => {
+    onNearInteriorRef.current = onNearInteriorChange;
+  }, [onNearInteriorChange]);
+
+  useEffect(() => {
+    onShelterRef.current = onShelterChange;
+  }, [onShelterChange]);
+
+  useEffect(() => {
     onInteractRef.current = onInteractStation;
   }, [onInteractStation]);
 
-
+  useEffect(() => {
+    onInteractInteriorRef.current = onInteractInterior;
+  }, [onInteractInterior]);
 
   useEffect(() => {
     onCollectSampleRef.current = onCollectSample;
@@ -215,13 +290,13 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     scene.add(hemiLight);
 
     const keyLight = new THREE.DirectionalLight(0xfff1db, 2.35);
-    keyLight.position.set(18, 24, 14);
+    keyLight.position.set(28, 38, 22);
     keyLight.castShadow = !isSoftwareGl;
     keyLight.shadow.mapSize.width = 2048;
     keyLight.shadow.mapSize.height = 2048;
     keyLight.shadow.camera.near = 2;
-    keyLight.shadow.camera.far = 75;
-    const d = 18;
+    keyLight.shadow.camera.far = 120;
+    const d = 42;
     keyLight.shadow.camera.left = -d;
     keyLight.shadow.camera.right = d;
     keyLight.shadow.camera.top = d;
@@ -231,7 +306,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     scene.add(keyLight);
 
     const rimLight = new THREE.DirectionalLight(0x60a5fa, 0.7);
-    rimLight.position.set(-16, 12, -18);
+    rimLight.position.set(-28, 16, -28);
     scene.add(rimLight);
 
     const textures = createProceduralTextures(renderer);
@@ -240,22 +315,29 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     const surfaceGroup = new THREE.Group();
     scene.add(surfaceGroup);
 
-    const terrainGeo = new THREE.PlaneGeometry(140, 140, 96, 96);
+    const terrainGeo = new THREE.PlaneGeometry(240, 240, 112, 112);
     terrainGeo.rotateX(-Math.PI / 2);
     const terrainMat = new THREE.MeshStandardMaterial({
-      map: textures.moonGround,
+      color: 0xffffff,
+      map: textures.marsGround,
+      bumpMap: textures.marsGroundBump,
+      bumpScale: 0.22,
       roughness: 0.92,
-      metalness: 0.04,
+      metalness: 0.02,
     });
     const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
     terrainMesh.receiveShadow = true;
     surfaceGroup.add(terrainMesh);
 
-    const rockGeo = new THREE.DodecahedronGeometry(0.65, 1);
+    // Match cutscene rock geometry, map & bump texture
+    const rockGeo = new THREE.DodecahedronGeometry(1.0, 0);
     const rockMat = new THREE.MeshStandardMaterial({
-      color: 0x94a3b8,
-      roughness: 0.88,
-      metalness: 0.06,
+      color: 0xffffff,
+      map: textures.marsRockMap,
+      bumpMap: textures.marsRockBump,
+      bumpScale: 0.16,
+      roughness: 0.92,
+      metalness: 0.03,
     });
     const rockInstanced = new THREE.InstancedMesh(rockGeo, rockMat, ROCK_SEEDS.length);
     rockInstanced.castShadow = !isSoftwareGl;
@@ -287,18 +369,18 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     celestialBody.position.set(-44, 34, -68);
     surfaceGroup.add(celestialBody);
 
-    const stormCount = 260;
+    const stormCount = 520;
     const stormPos = new Float32Array(stormCount * 3);
     for (let i = 0; i < stormCount; i++) {
-      stormPos[i * 3] = (Math.random() - 0.5) * 44;
-      stormPos[i * 3 + 1] = 2 + Math.random() * 18;
-      stormPos[i * 3 + 2] = (Math.random() - 0.5) * 44;
+      stormPos[i * 3] = (Math.random() - 0.5) * 86;
+      stormPos[i * 3 + 1] = 1.0 + Math.random() * 18;
+      stormPos[i * 3 + 2] = (Math.random() - 0.5) * 86;
     }
     const stormGeo = new THREE.BufferGeometry();
     stormGeo.setAttribute('position', new THREE.BufferAttribute(stormPos, 3));
     const stormMat = new THREE.PointsMaterial({
-      color: 0xf59e0b,
-      size: 0.3,
+      color: 0xd47d4a,
+      size: 0.42,
       transparent: true,
       opacity: 0,
       depthWrite: false,
@@ -312,22 +394,27 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       simRef.current.site,
       isSoftwareGl
     );
+    const interiorHandles: InteriorWorldHandles = buildInteriorWorld(
+      scene,
+      textures,
+      isSoftwareGl
+    );
 
-    // Third-person chase camera spherical offsets behind Commander Maya
+    // Third-person chase camera spherical offsets behind astronaut
     let chaseYaw = 0; // 0 means camera sits at +Z looking toward -Z (forward)
-    let chasePitch = 0.42;
-    let chaseDistance = 6.8;
+    let chasePitch = 0.44;
+    let chaseDistance = 8.4;
     let playerYaw = Math.PI; // facing into outpost initially
 
     const resetPlayerToSpawn = (site: OutpostSiteId) => {
-      const px = 2.6;
-      const pz = 5.2;
+      const px = 0;
+      const pz = 9.2;
       handles.playerAstro.group.position.set(px, groundHeightAt(px, pz, site), pz);
       playerYaw = Math.PI;
       handles.playerAstro.group.rotation.y = playerYaw;
       chaseYaw = 0;
-      chasePitch = 0.42;
-      chaseDistance = 6.8;
+      chasePitch = 0.44;
+      chaseDistance = 8.4;
     };
 
     const applySiteTheme = (site: OutpostSiteId) => {
@@ -341,6 +428,15 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       terrainGeo.computeVertexNormals();
 
       terrainMat.map = site === 'moon' ? textures.moonGround : textures.marsGround;
+      terrainMat.bumpMap = site === 'moon' ? null : textures.marsGroundBump;
+      terrainMat.bumpScale = site === 'moon' ? 0 : 0.22;
+      terrainMat.needsUpdate = true;
+
+      rockMat.map = site === 'moon' ? null : textures.marsRockMap;
+      rockMat.bumpMap = site === 'moon' ? null : textures.marsRockBump;
+      rockMat.bumpScale = site === 'moon' ? 0 : 0.16;
+      rockMat.color.setHex(site === 'moon' ? 0x94a3b8 : 0xffffff);
+      rockMat.needsUpdate = true;
 
       Object.entries(handles.moduleGroups).forEach(([key, grp]) => {
         if (key !== 'crew') {
@@ -363,17 +459,18 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
 
       ROCK_SEEDS.forEach((rk, i) => {
         const y = groundHeightAt(rk.x, rk.z, site);
-        _rockDummy.position.set(rk.x, y + rk.s * 0.15, rk.z);
+        _rockDummy.position.set(rk.x, y + rk.s * 0.18, rk.z);
         _rockDummy.rotation.set(rk.rx, rk.ry, 0);
-        _rockDummy.scale.set(rk.s * 1.15, rk.s * 0.72, rk.s * 0.95);
+        _rockDummy.scale.set(rk.s * 1.3, rk.s * 0.72, rk.s);
         _rockDummy.updateMatrix();
         rockInstanced.setMatrixAt(i, _rockDummy.matrix);
 
-        const tint = ((i * 37) % 30) / 100 - 0.15;
         if (site === 'moon') {
+          const tint = ((i * 37) % 30) / 100 - 0.15;
           _tmpColor.setRGB(0.46 + tint, 0.48 + tint, 0.52 + tint);
         } else {
-          _tmpColor.setRGB(0.62 + tint, 0.31 + tint * 0.5, 0.21 + tint * 0.4);
+          // Consistent warm Mars iron-oxide palette matching cutscene rocks
+          _tmpColor.setHSL(0.04 + (i % 5) * 0.008, 0.38, 0.55 + (i % 4) * 0.08);
         }
         rockInstanced.setColorAt(i, _tmpColor);
       });
@@ -385,14 +482,17 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
         hemiLight.color.setHex(0x93c5fd);
         hemiLight.groundColor.setHex(0x334155);
         keyLight.color.setHex(0xfff7ed);
+        keyLight.intensity = 2.35;
         celestialBody.scale.setScalar(1.0);
         (celestialBody.material as THREE.MeshStandardMaterial).map = textures.earthGlobe;
         (celestialBody.material as THREE.MeshStandardMaterial).color.setHex(0xffffff);
         (celestialBody.material as THREE.MeshStandardMaterial).needsUpdate = true;
       } else {
-        hemiLight.color.setHex(0xfdba74);
-        hemiLight.groundColor.setHex(0x5c2414);
-        keyLight.color.setHex(0xffedd5);
+        // Match cutscene Mars warm butterscotch illumination
+        hemiLight.color.setHex(0xd68c6c);
+        hemiLight.groundColor.setHex(0x522112);
+        keyLight.color.setHex(0xffd2b3);
+        keyLight.intensity = 2.15;
         celestialBody.scale.setScalar(0.32);
         (celestialBody.material as THREE.MeshStandardMaterial).map = null;
         (celestialBody.material as THREE.MeshStandardMaterial).color.setHex(0xa8a29e);
@@ -411,8 +511,12 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
     const pressedKeys: Record<string, boolean> = {};
     const onKeyDown = (e: KeyboardEvent) => {
       pressedKeys[e.code] = true;
-      if ((e.code === 'KeyE' || e.code === 'Enter') && nearestRef.current) {
-        onInteractRef.current(nearestRef.current);
+      if (e.code === 'KeyE' || e.code === 'Enter') {
+        if (simRef.current.worldLocation === 'inside' && nearestInteriorRef.current) {
+          onInteractInteriorRef.current(nearestInteriorRef.current);
+        } else if (simRef.current.worldLocation === 'outside' && nearestRef.current) {
+          onInteractRef.current(nearestRef.current);
+        }
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -445,6 +549,28 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       _mouseVec.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       _mouseVec.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(_mouseVec, camera);
+
+      if (simRef.current.worldLocation === 'inside') {
+        const iHits = raycaster.intersectObjects(interiorHandles.clickableProxies, false);
+        if (iHits.length > 0) {
+          const zId = iHits[0].object.userData.interiorZoneId as InteriorZoneId | undefined;
+          if (zId) {
+            onInteractInteriorRef.current(zId);
+            return;
+          }
+        }
+        groundRaycaster.setFromCamera(_mouseVec, camera);
+        if (groundRaycaster.ray.intersectPlane(_floorPlane, _floorHit)) {
+          const ix = THREE.MathUtils.clamp(_floorHit.x, -8.8, 17.6);
+          const iz = THREE.MathUtils.clamp(_floorHit.z, -3.8, 3.8);
+          interiorWalkTargetRef.current = { x: ix, z: iz };
+          interiorHandles.walkTargetRing.position.set(ix, 0.04, iz);
+          interiorHandles.walkTargetRing.visible = true;
+          soundEngine.playClick(460);
+        }
+        return;
+      }
+
       const hits = raycaster.intersectObjects(handles.clickableProxies, false);
       if (hits.length > 0) {
         const modId = hits[0].object.userData.moduleId as Exclude<ModuleId, 'overview'> | undefined;
@@ -462,9 +588,9 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
         const dist = Math.hypot(pt.x, pt.z);
         let wx = pt.x;
         let wz = pt.z;
-        if (dist > 21) {
-          wx = (wx / dist) * 21;
-          wz = (wz / dist) * 21;
+        if (dist > 42) {
+          wx = (wx / dist) * 42;
+          wz = (wz / dist) * 42;
         }
         clickWalkTargetRef.current = { x: wx, z: wz };
         handles.walkTargetRing.position.set(wx, groundHeightAt(wx, wz, simRef.current.site) + 0.06, wz);
@@ -490,6 +616,22 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       _mouseVec.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       _mouseVec.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(_mouseVec, camera);
+
+      if (simRef.current.worldLocation === 'inside') {
+        const iHits = raycaster.intersectObjects(interiorHandles.clickableProxies, false);
+        setHoveredId(null);
+        if (iHits.length > 0) {
+          const zId = iHits[0].object.userData.interiorZoneId as InteriorZoneId;
+          renderer.domElement.style.cursor = 'pointer';
+          setHoveredInteriorId((prev) => (prev === zId ? prev : zId));
+        } else {
+          renderer.domElement.style.cursor = 'grab';
+          setHoveredInteriorId((prev) => (prev === null ? prev : null));
+        }
+        return;
+      }
+
+      setHoveredInteriorId(null);
       const hits = raycaster.intersectObjects(handles.clickableProxies, false);
       if (hits.length > 0) {
         const modId = hits[0].object.userData.moduleId as Exclude<ModuleId, 'overview'>;
@@ -503,7 +645,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
 
     const onWheel = (e: WheelEvent) => {
       if (simRef.current.cameraMode === 'follow') {
-        chaseDistance = THREE.MathUtils.clamp(chaseDistance + e.deltaY * 0.006, 4.2, 13.5);
+        chaseDistance = THREE.MathUtils.clamp(chaseDistance + e.deltaY * 0.006, 5.0, 18.0);
       }
     };
 
@@ -555,20 +697,246 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       const elapsed = clock.getElapsedTime();
       const s = simRef.current;
 
-      // Sync active playable astronaut suit color in real time!
+      // Handle explicit transition spawns between Outside & Inside doorways
+      if (pendingSpawnRef.current) {
+        const sp = pendingSpawnRef.current;
+        pendingSpawnRef.current = null;
+        if (sp === 'inside_station') {
+          interiorHandles.playerRig.group.position.set(0, 0, 2.5);
+          interiorHandles.playerRig.group.rotation.y = Math.PI;
+          playerYaw = Math.PI;
+          chaseYaw = 0;
+          interiorWalkTargetRef.current = null;
+          interiorHandles.walkTargetRing.visible = false;
+        } else if (sp === 'inside_greenhouse') {
+          interiorHandles.playerRig.group.position.set(14.2, 0, 2.1);
+          interiorHandles.playerRig.group.rotation.y = Math.PI;
+          playerYaw = Math.PI;
+          chaseYaw = 0;
+          interiorWalkTargetRef.current = null;
+          interiorHandles.walkTargetRing.visible = false;
+        } else if (sp === 'outside_station') {
+          const gy = groundHeightAt(0, 7.6, s.site);
+          handles.playerAstro.group.position.set(0, gy, 7.6);
+          handles.playerAstro.group.rotation.y = 0;
+          playerYaw = 0;
+          clickWalkTargetRef.current = null;
+          handles.walkTargetRing.visible = false;
+        } else if (sp === 'outside_greenhouse') {
+          const gy = groundHeightAt(15.8, 3.8, s.site);
+          handles.playerAstro.group.position.set(15.8, gy, 3.8);
+          handles.playerAstro.group.rotation.y = 0;
+          playerYaw = 0;
+          clickWalkTargetRef.current = null;
+          handles.walkTargetRing.visible = false;
+        }
+      }
+
+      // Sync active playable astronaut suit accent & crop growth visuals
       const astroProfile = ASTRONAUT_PROFILES[s.activeAstronaut] || ASTRONAUT_PROFILES.maya;
       handles.playerAstro.suitAccentMat.color.setHex(astroProfile.suitColorHex);
       (handles.playerMarker.material as THREE.MeshBasicMaterial).color.setHex(astroProfile.suitColorHex);
+      interiorHandles.playerAccentMat.color.setHex(astroProfile.suitColorHex);
+      (interiorHandles.playerMarker.material as THREE.MeshBasicMaterial).color.setHex(astroProfile.suitColorHex);
+      applyCropStageToBeds(handles.exteriorCropBedStages, s.cropPlots);
+      applyCropStageToBeds(interiorHandles.cropBedStages, s.cropPlots);
 
-      // ---------------------------------------------------------
-      // INTERACTIVE 3RD-PERSON PLAYER EXPLORATION MODE
-      // ---------------------------------------------------------
+      // =========================================================
+      // INSIDE SPACE STATION + ATTACHED GREENHOUSE MODE
+      // =========================================================
+      if (s.worldLocation === 'inside') {
+        surfaceGroup.visible = false;
+        stars.visible = false;
+        interiorHandles.root.visible = true;
+
+        const insideBg = new THREE.Color(0x080f1e);
+        if (!(scene.background as THREE.Color)?.equals(insideBg)) {
+          scene.background = insideBg;
+          scene.fog = null;
+        }
+
+        // Player is automatically sheltered from dust storms while inside!
+        if (!inShelterRef.current) {
+          inShelterRef.current = true;
+          onShelterRef.current(true);
+        }
+        if (nearestRef.current !== null) {
+          nearestRef.current = null;
+          onNearRef.current(null);
+        }
+
+        let moveForward = 0;
+        let moveRight = 0;
+        if (pressedKeys['KeyW'] || pressedKeys['ArrowUp']) moveForward += 1;
+        if (pressedKeys['KeyS'] || pressedKeys['ArrowDown']) moveForward -= 1;
+        if (pressedKeys['KeyD'] || pressedKeys['ArrowRight']) moveRight += 1;
+        if (pressedKeys['KeyA'] || pressedKeys['ArrowLeft']) moveRight -= 1;
+
+        const ipPos = interiorHandles.playerRig.group.position;
+        let dirX = 0;
+        let dirZ = 0;
+        let isMoving = false;
+
+        if (moveForward !== 0 || moveRight !== 0) {
+          interiorWalkTargetRef.current = null;
+          interiorHandles.walkTargetRing.visible = false;
+          const forwardX = -Math.sin(chaseYaw);
+          const forwardZ = -Math.cos(chaseYaw);
+          const rightX = Math.cos(chaseYaw);
+          const rightZ = -Math.sin(chaseYaw);
+          dirX = forwardX * moveForward + rightX * moveRight;
+          dirZ = forwardZ * moveForward + rightZ * moveRight;
+          const len = Math.hypot(dirX, dirZ) || 1;
+          dirX /= len;
+          dirZ /= len;
+          isMoving = true;
+        } else if (interiorWalkTargetRef.current) {
+          let tx = interiorWalkTargetRef.current.x;
+          let tz = interiorWalkTargetRef.current.z;
+          // Auto-funnel cleanly through the Station-Greenhouse connecting airlock corridor!
+          const crossingToGh = ipPos.x < 5.6 && tx > 8.6;
+          const crossingToStation = ipPos.x > 8.6 && tx < 5.6;
+          if ((crossingToGh || crossingToStation) && Math.hypot(ipPos.x - 7.1, ipPos.z) > 1.2) {
+            tx = crossingToGh ? 9.2 : 5.0;
+            tz = 0;
+          }
+          const dx = tx - ipPos.x;
+          const dz = tz - ipPos.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist > 0.3) {
+            dirX = dx / dist;
+            dirZ = dz / dist;
+            isMoving = true;
+          } else if (!crossingToGh && !crossingToStation) {
+            interiorWalkTargetRef.current = null;
+            interiorHandles.walkTargetRing.visible = false;
+          }
+        }
+
+        if (isMoving) {
+          const speed = s.walkSpeed === 'fast' ? 7.6 : 5.4;
+          let nx = THREE.MathUtils.clamp(ipPos.x + dirX * speed * delta, -8.7, 17.4);
+          let nz = THREE.MathUtils.clamp(ipPos.z + dirZ * speed * delta, -3.7, 3.8);
+
+          // Connecting corridor wall constraints vs main rooms
+          if (nx > 5.2 && nx < 9.0) {
+            nz = THREE.MathUtils.clamp(nz, -1.15, 1.15);
+          } else if (nx <= 5.2) {
+            // Keep outside lab desk & north machinery
+            if (nx > -2.5 && nx < 3.4 && nz < -1.8) {
+              nz = -1.8;
+            }
+          } else {
+            nz = THREE.MathUtils.clamp(nz, -3.1, 3.2);
+          }
+
+          ipPos.x = nx;
+          ipPos.z = nz;
+
+          const targetYaw = Math.atan2(dirX, dirZ);
+          let diff = targetYaw - playerYaw;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          playerYaw += diff * Math.min(1, delta * 12);
+          interiorHandles.playerRig.group.rotation.y = playerYaw;
+          poseAstronautWalk(interiorHandles.playerRig, elapsed * 9.2, 0.95);
+
+          stepAudioTimer += delta;
+          if (stepAudioTimer > 0.38) {
+            stepAudioTimer = 0;
+            soundEngine.playFootstep();
+          }
+        } else {
+          dampRigToIdle(interiorHandles.playerRig, delta);
+        }
+
+        // Nearest interactive interior zone detection
+        let foundZone: InteriorZoneId | null = null;
+        let bestDist = Infinity;
+        for (const pt of INTERIOR_POINTS) {
+          const d = Math.hypot(ipPos.x - pt.x, ipPos.z - pt.z);
+          const ring = interiorHandles.zoneRings[pt.id];
+          if (d <= pt.interactRadius && d < bestDist) {
+            bestDist = d;
+            foundZone = pt.id;
+          }
+          if (ring) {
+            const mat = ring.material as THREE.MeshBasicMaterial;
+            const isNear = d <= pt.interactRadius;
+            mat.opacity = THREE.MathUtils.damp(mat.opacity, isNear ? 0.85 : 0.3, 8, delta);
+          }
+        }
+        if (nearestInteriorRef.current !== foundZone) {
+          nearestInteriorRef.current = foundZone;
+          onNearInteriorRef.current(foundZone);
+        }
+
+        // Cutaway chase camera smoothly framing the interior
+        controls.enabled = false;
+        const clampedPitch = THREE.MathUtils.clamp(chasePitch, 0.42, 0.92);
+        const camDist = 7.4;
+        _camTargetPos.set(
+          ipPos.x + Math.sin(chaseYaw) * Math.cos(clampedPitch) * camDist,
+          1.8 + Math.sin(clampedPitch) * camDist,
+          ipPos.z + Math.cos(chaseYaw) * Math.cos(clampedPitch) * camDist
+        );
+        camera.position.lerp(_camTargetPos, 1 - Math.exp(-8.5 * delta));
+        _camTargetLook.set(ipPos.x, 1.25, ipPos.z);
+        camera.lookAt(_camTargetLook);
+
+        // Animate interior equipment & lights
+        const ghFactor = s.powerAllocation.greenhouse / 3;
+        interiorHandles.growLightMat.emissiveIntensity = 0.35 + ghFactor * 1.7;
+        interiorHandles.growPointLight.intensity = 0.6 + ghFactor * 2.6;
+
+        interiorHandles.commsLedMat.color.setHex(s.commsRepaired ? 0x22c55e : 0xef4444);
+        interiorHandles.commsLedMat.emissive.setHex(s.commsRepaired ? 0x16a34a : 0xdc2626);
+        interiorHandles.commsLedMat.emissiveIntensity = s.commsRepaired
+          ? 1.5
+          : 0.7 + Math.sin(elapsed * 8) * 0.65;
+
+        if (s.scanningActive) {
+          interiorHandles.scannerBeamRing.position.y = 1.25 + Math.sin(elapsed * 6) * 0.95;
+          interiorHandles.scannerLedMat.emissiveIntensity = 2.4;
+        } else {
+          interiorHandles.scannerBeamRing.position.y = THREE.MathUtils.damp(
+            interiorHandles.scannerBeamRing.position.y,
+            0.32,
+            6,
+            delta
+          );
+          interiorHandles.scannerLedMat.emissiveIntensity = 1.2;
+        }
+
+        renderer.render(scene, camera);
+        if (isSoftwareGl) afterDraw(tick);
+        else frameId = requestAnimationFrame(tick);
+        return;
+      }
+
+      // =========================================================
+      // OUTSIDE MARTIAN / LUNAR SURFACE EXPLORATION MODE
+      // =========================================================
       surfaceGroup.visible = true;
+      stars.visible = true;
+      interiorHandles.root.visible = false;
+      if (nearestInteriorRef.current !== null) {
+        nearestInteriorRef.current = null;
+        onNearInteriorRef.current(null);
+      }
 
-        const skyHex = s.site === 'moon' ? 0x060913 : 0x28130e;
-        if (!(scene.background as THREE.Color)?.equals(new THREE.Color(skyHex))) {
+        const skyHex =
+          s.site === 'moon' ? 0x060913 : s.isDustStorm ? 0x6b2814 : 0xb86544;
+        const targetFogDensity =
+          s.site === 'moon' ? 0.011 : s.isDustStorm ? 0.032 : 0.0075;
+        if (
+          !(scene.background as THREE.Color)?.equals(new THREE.Color(skyHex)) ||
+          !scene.fog
+        ) {
           scene.background = new THREE.Color(skyHex);
-          scene.fog = new THREE.FogExp2(skyHex, s.site === 'moon' ? 0.013 : 0.016);
+          scene.fog = new THREE.FogExp2(skyHex, targetFogDensity);
+        } else if (scene.fog instanceof THREE.FogExp2) {
+          scene.fog.density = THREE.MathUtils.damp(scene.fog.density, targetFogDensity, 2.5, delta);
         }
 
         handles.landedShip.group.position.set(
@@ -623,18 +991,23 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
         }
 
         if (isMoving) {
-          const speed = s.walkSpeed === 'fast' ? 6.6 : 4.5;
+          const speed = s.walkSpeed === 'fast' ? 9.2 : 6.4;
           let nextX = player.group.position.x + dirX * speed * delta;
           let nextZ = player.group.position.z + dirZ * speed * delta;
 
-          // Keep inside playable crater valley
+          // Keep inside expanded playable crater valley (42m radius!)
           const distFromOrigin = Math.hypot(nextX, nextZ);
-          if (distFromOrigin > 21) {
-            nextX = (nextX / distFromOrigin) * 21;
-            nextZ = (nextZ / distFromOrigin) * 21;
+          if (distFromOrigin > 42) {
+            nextX = (nextX / distFromOrigin) * 42;
+            nextZ = (nextZ / distFromOrigin) * 42;
           }
 
-          // Smooth collision push-out from solid building interiors
+          // Smooth collision push-out from elongated Station Wings (-10..+10) + attached Greenhouse (+10..+19.8) & solid modules
+          if (nextX > -10.5 && nextX < 19.6 && Math.abs(nextZ) < 3.1) {
+            if (Math.abs(nextX) > 5.0) {
+              nextZ = nextZ >= 0 ? 3.1 : -3.1;
+            }
+          }
           for (const st of STATION_POINTS) {
             const dx = nextX - st.x;
             const dz = nextZ - st.z;
@@ -656,11 +1029,11 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
           playerYaw += diff * Math.min(1, delta * 12);
           player.group.rotation.y = playerYaw;
 
-          const walkSwing = Math.sin(elapsed * (s.walkSpeed === 'fast' ? 12 : 9)) * 0.52;
-          player.leftLeg.rotation.x = walkSwing;
-          player.rightLeg.rotation.x = -walkSwing;
-          player.leftArm.rotation.x = -walkSwing * 0.75;
-          player.rightArm.rotation.x = walkSwing * 0.75;
+          poseAstronautWalk(
+            player.rig,
+            elapsed * (s.walkSpeed === 'fast' ? 11.5 : 8.8),
+            s.walkSpeed === 'fast' ? 1.15 : 0.95
+          );
 
           stepAudioTimer += delta;
           if (stepAudioTimer > 0.36) {
@@ -668,10 +1041,7 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
             soundEngine.playFootstep();
           }
         } else {
-          player.leftLeg.rotation.x = THREE.MathUtils.damp(player.leftLeg.rotation.x, 0, 10, delta);
-          player.rightLeg.rotation.x = THREE.MathUtils.damp(player.rightLeg.rotation.x, 0, 10, delta);
-          player.leftArm.rotation.x = THREE.MathUtils.damp(player.leftArm.rotation.x, 0, 10, delta);
-          player.rightArm.rotation.x = THREE.MathUtils.damp(player.rightArm.rotation.x, 0, 10, delta);
+          dampRigToIdle(player.rig, delta);
         }
 
         player.group.position.y = groundHeightAt(
@@ -694,11 +1064,19 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
               }
             });
             const dSample = Math.hypot(player.group.position.x - smp.x, player.group.position.z - smp.z);
-            if (dSample < 1.85) {
+            if (dSample < 2.15) {
               onCollectSampleRef.current(smp.id);
             }
           }
         });
+
+        // Shelter check: inside or at the Space Station shelter perimeter (<= 8.8m from 0,0)
+        const distFromStation = Math.hypot(player.group.position.x, player.group.position.z);
+        const nowInShelter = distFromStation <= 8.8;
+        if (inShelterRef.current !== nowInShelter) {
+          inShelterRef.current = nowInShelter;
+          onShelterRef.current(nowInShelter);
+        }
 
         // 2. Proximity Detection to Outpost Stations & NPC Crew
         let foundNear: Exclude<ModuleId, 'overview'> | null = null;
@@ -714,8 +1092,14 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
           if (ring) {
             const mat = ring.material as THREE.MeshBasicMaterial;
             const isNear = d <= st.interactRadius;
-            mat.color.setHex(isNear ? 0xf59e0b : 0x38bdf8);
-            mat.opacity = THREE.MathUtils.damp(mat.opacity, isNear ? 0.78 : 0.16, 8, delta);
+            if (st.id === 'habitat' && s.isDustStorm) {
+              // Highlight the Space Station shelter zone brightly during Mars dust storms!
+              mat.color.setHex(nowInShelter ? 0x22c55e : 0xf59e0b);
+              mat.opacity = 0.55 + Math.sin(elapsed * 7) * 0.25;
+            } else {
+              mat.color.setHex(isNear ? 0xf59e0b : 0x38bdf8);
+              mat.opacity = THREE.MathUtils.damp(mat.opacity, isNear ? 0.78 : 0.2, 8, delta);
+            }
           }
         }
 
@@ -771,45 +1155,9 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
           controls.update();
         }
 
-        // 4. NPC Teammates (Leo & Zara) patrol or shelter in storms
-        handles.npcAstronauts.forEach((astro, idx) => {
-          const target2D = s.isSolarStorm ? astro.homePos : astro.workPos;
-          const patrolOffsetX = s.isSolarStorm ? 0 : Math.sin(elapsed * 0.45 + idx * 2.1) * 0.85;
-          const patrolOffsetZ = s.isSolarStorm ? 0 : Math.cos(elapsed * 0.35 + idx * 1.7) * 0.7;
-          const tx = target2D.x + patrolOffsetX;
-          const tz = target2D.y + patrolOffsetZ;
-
-          const dx = tx - astro.group.position.x;
-          const dz = tz - astro.group.position.z;
-          const dist = Math.hypot(dx, dz);
-
-          if (dist > 0.08) {
-            const step = Math.min(dist, (s.isSolarStorm ? 2.4 : 1.1) * delta);
-            astro.group.position.x += (dx / dist) * step;
-            astro.group.position.z += (dz / dist) * step;
-            astro.group.rotation.y = Math.atan2(dx, dz);
-            const walkSwing = Math.sin(elapsed * (s.isSolarStorm ? 10 : 5.5) + idx) * 0.42;
-            astro.leftLeg.rotation.x = walkSwing;
-            astro.rightLeg.rotation.x = -walkSwing;
-            astro.leftArm.rotation.x = -walkSwing * 0.7;
-            astro.rightArm.rotation.x = walkSwing * 0.7;
-          } else {
-            astro.leftLeg.rotation.x = THREE.MathUtils.damp(astro.leftLeg.rotation.x, 0, 8, delta);
-            astro.rightLeg.rotation.x = THREE.MathUtils.damp(astro.rightLeg.rotation.x, 0, 8, delta);
-            astro.leftArm.rotation.x = THREE.MathUtils.damp(astro.leftArm.rotation.x, 0, 8, delta);
-            astro.rightArm.rotation.x = THREE.MathUtils.damp(
-              astro.rightArm.rotation.x,
-              Math.sin(elapsed * 2.5 + idx) * 0.15,
-              5,
-              delta
-            );
-          }
-
-          astro.group.position.y = groundHeightAt(
-            astro.group.position.x,
-            astro.group.position.z,
-            s.site
-          );
+        // 4. NPC Teammates patrol or shelter in storms (idle pose clean)
+        handles.npcAstronauts.forEach((astro) => {
+          dampRigToIdle(astro.rig, delta);
         });
 
       // Habitat radiation shutters & shield bubble
@@ -821,8 +1169,8 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       shutterProgress = THREE.MathUtils.damp(shutterProgress, targetShutter, 4.0, delta);
       handles.shieldShutters.forEach((sh) => {
         const ang = sh.userData.baseAngle as number;
-        const r = 3.22 - shutterProgress * 0.12;
-        sh.position.set(Math.cos(ang) * r, 1.55 + (1 - shutterProgress) * 1.15, Math.sin(ang) * r);
+        const r = 4.65 - shutterProgress * 0.14;
+        sh.position.set(Math.cos(ang) * r, 2.2 + (1 - shutterProgress) * 1.4, Math.sin(ang) * r);
       });
       const bubbleMat = handles.shieldBubble.material as THREE.MeshBasicMaterial;
       const targetBubbleOpacity =
@@ -831,12 +1179,18 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       handles.shieldBubble.rotation.y += delta * 0.25;
       handles.cabinGlowMat.emissiveIntensity = 0.4 + (s.lifeSupport / 100) * 1.1;
 
-      // Solar Wings tilt
-      const targetTilt = s.isDustStorm ? 0.85 : Math.sin(elapsed * 0.25) * 0.22 + 0.32;
+      // Solar Wings tilt & visible Mars dust coating
+      const targetTilt = s.isDustStorm ? 0.92 : Math.sin(elapsed * 0.25) * 0.22 + 0.32;
       handles.solarWings.forEach((wing) => {
         wing.rotation.x = THREE.MathUtils.damp(wing.rotation.x, targetTilt, 3, delta);
       });
-      handles.solarCellMat.emissiveIntensity = s.isDustStorm ? 0.04 : 0.2;
+      handles.solarCellMat.emissiveIntensity = s.solarDust >= 50 || s.isDustStorm ? 0.02 : 0.22;
+      handles.solarDustMat.opacity = THREE.MathUtils.damp(
+        handles.solarDustMat.opacity,
+        THREE.MathUtils.clamp((s.solarDust / 100) * 0.9, 0, 0.9),
+        4,
+        delta
+      );
 
       // Greenhouse grow lights
       const ghPowerFactor = s.powerAllocation.greenhouse / 3;
@@ -846,43 +1200,70 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
       // Life Support fan
       handles.lifeFan.rotation.z -= delta * (1.2 + s.powerAllocation.lifesupport * 3.2);
 
-      // Comms dish & beam
+      // Comms dish & Earth uplink beam (damaged red flicker vs fixed bright cyan!)
       const sciPower = s.powerAllocation.science;
-      handles.commsHead.rotation.y = Math.sin(elapsed * 0.45) * 0.35;
-      handles.commsBeaconMat.emissiveIntensity = sciPower > 0 ? 1.2 + Math.sin(elapsed * 4) * 0.4 : 0.2;
+      handles.commsHead.rotation.y = s.commsRepaired
+        ? Math.sin(elapsed * 0.45) * 0.35
+        : -0.45 + Math.sin(elapsed * 4.5) * 0.03;
+      handles.commsBeaconMat.color.setHex(s.commsRepaired ? 0x38bdf8 : 0xef4444);
+      handles.commsBeaconMat.emissive.setHex(s.commsRepaired ? 0x0ea5e9 : 0xdc2626);
+      handles.commsBeaconMat.emissiveIntensity = s.commsRepaired
+        ? sciPower > 0
+          ? 1.2 + Math.sin(elapsed * 4) * 0.4
+          : 0.35
+        : 0.4 + Math.sin(elapsed * 7) * 0.4;
       const beamMat = handles.commsBeam.material as THREE.MeshBasicMaterial;
-      beamMat.opacity = sciPower > 0 ? 0.12 + sciPower * 0.06 : 0.02;
+      beamMat.color.setHex(s.commsRepaired ? 0x38bdf8 : 0xef4444);
+      beamMat.opacity = s.commsRepaired ? (sciPower > 0 ? 0.14 + sciPower * 0.06 : 0.04) : 0.02;
 
-      // Rover patrol
+      // Earth Rescue Mission Rocket Descent (Sol 150 finale!)
+      if (s.rescueArrived) {
+        handles.rescueShip.group.visible = true;
+        const targetY = handles.landingPadPos.y + 0.25;
+        handles.rescueShip.group.position.y = THREE.MathUtils.damp(
+          handles.rescueShip.group.position.y,
+          targetY,
+          1.4,
+          delta
+        );
+        const altitudeLeft = Math.max(0, handles.rescueShip.group.position.y - targetY);
+        (handles.rescueShip.thrusterFlame.material as THREE.MeshBasicMaterial).opacity =
+          altitudeLeft > 0.2 ? 0.85 : 0.0;
+      } else {
+        handles.rescueShip.group.visible = false;
+        handles.rescueShip.group.position.y = handles.landingPadPos.y + 28;
+      }
+
+      // Rover patrol (all 6 spoked wheels & mechanical arm animate smoothly!)
       if (sciPower > 0) {
-        const rt = elapsed * (0.22 + sciPower * 0.12);
-        const rx = Math.sin(rt) * 2.2;
-        const rz = Math.cos(rt * 0.7) * 1.6;
+        const rt = elapsed * (0.22 + sciPower * 0.1);
+        const rx = Math.sin(rt) * 2.8;
+        const rz = Math.cos(rt * 0.7) * 2.1;
         handles.roverGroup.position.x = THREE.MathUtils.damp(handles.roverGroup.position.x, rx, 2.5, delta);
         handles.roverGroup.position.z = THREE.MathUtils.damp(handles.roverGroup.position.z, rz, 2.5, delta);
         const worldX = handles.moduleGroups.science.position.x + handles.roverGroup.position.x;
         const worldZ = handles.moduleGroups.science.position.z + handles.roverGroup.position.z;
         handles.roverGroup.position.y =
           groundHeightAt(worldX, worldZ, s.site) - handles.moduleGroups.science.position.y;
-        handles.roverGroup.rotation.y = Math.atan2(Math.cos(rt) * 2.2, -Math.sin(rt * 0.7) * 1.12);
+        handles.roverGroup.rotation.y = Math.atan2(Math.cos(rt) * 2.8, -Math.sin(rt * 0.7) * 1.47);
         handles.roverWheels.forEach((w) => {
-          w.rotation.x += delta * 2.5;
+          w.rotation.x += delta * 2.8;
         });
         handles.roverArm.rotation.x = Math.sin(elapsed * 1.8) * 0.25 - 0.15;
       }
 
-      // Space Weather Storm Particles
-      const targetStorm = s.isSolarStorm ? 1 : s.isDustStorm ? 0.65 : 0;
+      // Space Weather & Intense Mars Dust Storm Particles
+      const targetStorm = s.isDustStorm ? 1.0 : s.isSolarStorm ? 0.85 : 0.15;
       stormStrength = THREE.MathUtils.damp(stormStrength, targetStorm, 2.5, delta);
-      stormMat.opacity = stormStrength * 0.75;
-      stormMat.color.setHex(s.isSolarStorm ? 0xfbbf24 : 0xfb923c);
+      stormMat.opacity = s.isDustStorm ? stormStrength * 0.88 : s.isSolarStorm ? stormStrength * 0.72 : 0.12;
+      stormMat.color.setHex(s.isSolarStorm && !s.isDustStorm ? 0xfbbf24 : 0xd47d4a);
       if (stormStrength > 0.02) {
         const arr = stormGeo.attributes.position.array as Float32Array;
         for (let i = 0; i < stormCount; i++) {
-          arr[i * 3] += delta * (s.isSolarStorm ? 11 : 5);
-          arr[i * 3 + 1] -= delta * (s.isSolarStorm ? 3.8 : 0.6);
-          if (arr[i * 3] > 22) arr[i * 3] = -22;
-          if (arr[i * 3 + 1] < 0.5) arr[i * 3 + 1] = 19;
+          arr[i * 3] += delta * (s.isDustStorm ? 20 : s.isSolarStorm ? 12 : 1.8);
+          arr[i * 3 + 1] -= delta * (s.isDustStorm ? 1.2 : s.isSolarStorm ? 3.5 : 0.25);
+          if (arr[i * 3] > 43) arr[i * 3] = -43;
+          if (arr[i * 3 + 1] < 0.4) arr[i * 3 + 1] = 18;
         }
         stormGeo.attributes.position.needsUpdate = true;
       }
@@ -938,9 +1319,16 @@ export const OutpostViewport: React.FC<OutpostViewportProps> = ({
         aria-label="Interactive 3D Lunar and Martian Outpost Viewport"
       />
 
-      {hoveredId && (
+      {hoveredId && !hoveredInteriorId && (
         <div className="pointer-events-none fixed left-1/2 top-20 z-10 -translate-x-1/2 rounded-xl border border-sky-500/50 bg-[#0B1120]/95 px-3.5 py-1.5 text-xs font-semibold text-sky-200 shadow-lg">
           Click to interact: {MODULE_SPECS[hoveredId].name}
+        </div>
+      )}
+
+      {hoveredInteriorId && (
+        <div className="pointer-events-none fixed left-1/2 top-20 z-10 -translate-x-1/2 rounded-xl border border-emerald-400/60 bg-[#0B1120]/95 px-3.5 py-1.5 text-xs font-semibold text-emerald-200 shadow-lg">
+          Click to use:{' '}
+          {INTERIOR_POINTS.find((pt) => pt.id === hoveredInteriorId)?.name ?? hoveredInteriorId}
         </div>
       )}
 

@@ -1,36 +1,35 @@
 import * as THREE from 'three';
+import { AstronautRig, createAstronaut as createDetailedEvaRig } from '../cutscene/scene/models';
 import { FIELD_SAMPLES, ModuleId, OutpostSiteId } from '../data/missionScenarios';
+import { buildRealisticCropBed } from './cropVisuals';
 import { ProceduralTextureSet } from './textures';
 
 export function groundHeightAt(x: number, z: number, site: OutpostSiteId): number {
   const dist = Math.hypot(x, z);
-  const flatFactor = THREE.MathUtils.smoothstep(dist, 11.2, 22.5);
+  const flatFactor = THREE.MathUtils.smoothstep(dist, 28.0, 48.0);
 
   if (site === 'moon') {
-    const rim = Math.pow(Math.max(0, dist - 20) * 0.08, 1.35) * 1.1;
+    const rim = Math.pow(Math.max(0, dist - 34) * 0.08, 1.35) * 1.1;
     const ripples =
-      Math.sin(x * 0.14 + 0.5) * Math.cos(z * 0.14 - 0.3) * 1.3 +
-      Math.sin(x * 0.31 - z * 0.23) * 0.45;
-    const crater1 = Math.max(0, 1 - Math.hypot(x - 19, z + 15) / 7.5);
-    const crater2 = Math.max(0, 1 - Math.hypot(x + 22, z - 12) / 9);
-    return flatFactor * (ripples + rim - crater1 * 2.1 - crater2 * 2.4);
+      Math.sin(x * 0.12 + 0.5) * Math.cos(z * 0.12 - 0.3) * 1.45 +
+      Math.sin(x * 0.28 - z * 0.21) * 0.5;
+    const crater1 = Math.max(0, 1 - Math.hypot(x - 36, z + 28) / 10);
+    const crater2 = Math.max(0, 1 - Math.hypot(x + 38, z - 24) / 12);
+    return flatFactor * (ripples + rim - crater1 * 2.4 - crater2 * 2.8);
   }
 
-  const ridge = Math.pow(Math.max(0, dist - 22) * 0.075, 1.25) * 0.95;
+  const ridge = Math.pow(Math.max(0, dist - 36) * 0.075, 1.25) * 1.05;
   const dunes =
-    Math.sin(x * 0.12 - z * 0.09) * 1.15 +
-    Math.cos(x * 0.27 + z * 0.21) * 0.42;
-  const basin = Math.max(0, 1 - Math.hypot(x + 17, z + 18) / 8.5);
-  return flatFactor * (dunes + ridge - basin * 1.6);
+    Math.sin(x * 0.08 - z * 0.07) * 1.25 +
+    Math.cos(x * 0.22 + z * 0.18) * 0.48;
+  const basin = Math.max(0, 1 - Math.hypot(x + 32, z + 30) / 11.0);
+  return flatFactor * (dunes + ridge - basin * 1.8);
 }
 
 export interface AstronautHandle {
   name: string;
+  rig: AstronautRig;
   group: THREE.Group;
-  leftLeg: THREE.Group;
-  rightLeg: THREE.Group;
-  leftArm: THREE.Group;
-  rightArm: THREE.Group;
   suitAccentMat: THREE.MeshStandardMaterial;
   homePos: THREE.Vector2;
   workPos: THREE.Vector2;
@@ -51,15 +50,16 @@ export interface OutpostDynamicHandles {
   cabinGlowMat: THREE.MeshStandardMaterial;
   solarWings: THREE.Group[];
   solarCellMat: THREE.MeshStandardMaterial;
+  solarDustMat: THREE.MeshStandardMaterial;
   growLightMat: THREE.MeshStandardMaterial;
   growPointLight: THREE.PointLight;
-  cropInstanced: THREE.InstancedMesh;
+  exteriorCropBedStages: Array<[THREE.Group, THREE.Group, THREE.Group]>;
   lifeFan: THREE.Group;
   commsHead: THREE.Group;
   commsBeaconMat: THREE.MeshStandardMaterial;
   commsBeam: THREE.Mesh;
   roverGroup: THREE.Group;
-  roverWheels: THREE.Mesh[];
+  roverWheels: THREE.Object3D[];
   roverArm: THREE.Group;
   playerAstro: AstronautHandle;
   playerMarker: THREE.Mesh;
@@ -69,6 +69,7 @@ export interface OutpostDynamicHandles {
   walkTargetRing: THREE.Mesh;
   landingPadPos: THREE.Vector3;
   landedShip: SpacecraftHandle;
+  rescueShip: SpacecraftHandle;
   selectionRing: THREE.Mesh;
 }
 
@@ -116,116 +117,16 @@ function createAstronaut(
   homePos: THREE.Vector2,
   workPos: THREE.Vector2
 ): AstronautHandle {
-  const group = new THREE.Group();
-  addContactShadow(group, 0.55, shadowTex);
-
-  const suitWhite = new THREE.MeshStandardMaterial({
-    color: 0xf1f5f9,
-    roughness: 0.62,
-    metalness: 0.08,
-  });
-  const suitAccent = new THREE.MeshStandardMaterial({
-    color: accentHex,
-    roughness: 0.45,
-    metalness: 0.15,
-  });
-  const bootMat = new THREE.MeshStandardMaterial({
-    color: 0x334155,
-    roughness: 0.85,
-    metalness: 0.1,
-  });
-  const visorMat = new THREE.MeshPhysicalMaterial({
-    color: 0xf59e0b,
-    roughness: 0.08,
-    metalness: 0.92,
-    clearcoat: 1.0,
-  });
-
-  // Left & Right Legs (pivoted at hip y = 0.56)
-  const makeLeg = (xOff: number) => {
-    const legPivot = new THREE.Group();
-    legPivot.position.set(xOff, 0.56, 0);
-    const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.1, 0.44, 10), suitWhite);
-    thigh.position.y = -0.22;
-    thigh.castShadow = true;
-    legPivot.add(thigh);
-    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.28), bootMat);
-    boot.position.set(0, -0.49, 0.04);
-    boot.castShadow = true;
-    legPivot.add(boot);
-    return legPivot;
-  };
-
-  const leftLeg = makeLeg(-0.13);
-  const rightLeg = makeLeg(0.13);
-  group.add(leftLeg, rightLeg);
-
-  // Torso + Colored Chest Stripe + Belt
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.54, 0.28), suitWhite);
-  torso.position.y = 0.85;
-  torso.castShadow = true;
-  group.add(torso);
-
-  const badge = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.16, 0.3), suitAccent);
-  badge.position.y = 0.9;
-  group.add(badge);
-
-  // PLSS Life-Support Backpack + Antenna
-  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.46, 0.2), suitWhite);
-  pack.position.set(0, 0.88, -0.22);
-  pack.castShadow = true;
-  group.add(pack);
-
-  const packStripe = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.08, 0.22), suitAccent);
-  packStripe.position.set(0, 1.02, -0.22);
-  group.add(packStripe);
-
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.34, 6), bootMat);
-  antenna.position.set(0.14, 1.24, -0.26);
-  group.add(antenna);
-
-  // Left & Right Arms (pivoted at shoulder y = 1.06)
-  const makeArm = (xOff: number) => {
-    const armPivot = new THREE.Group();
-    armPivot.position.set(xOff, 1.06, 0);
-    const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.075, 0.42, 10), suitWhite);
-    sleeve.position.y = -0.2;
-    sleeve.castShadow = true;
-    armPivot.add(sleeve);
-    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.085, 8, 8), suitAccent);
-    glove.position.y = -0.43;
-    armPivot.add(glove);
-    return armPivot;
-  };
-
-  const leftArm = makeArm(-0.3);
-  const rightArm = makeArm(0.3);
-  group.add(leftArm, rightArm);
-
-  // Helmet + Gold Reflective Visor
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 14), suitWhite);
-  helmet.position.y = 1.32;
-  helmet.castShadow = true;
-  group.add(helmet);
-
-  const visor = new THREE.Mesh(
-    new THREE.SphereGeometry(0.21, 14, 12, -Math.PI * 0.38, Math.PI * 0.76, Math.PI * 0.2, Math.PI * 0.55),
-    visorMat
-  );
-  visor.rotation.y = Math.PI * 0.5;
-  visor.position.set(0, 1.33, 0.06);
-  group.add(visor);
-
-  tagInteractiveProxy(group, 'crew', 1.1, 1.75, 1.1, proxies);
+  const rig = createDetailedEvaRig(accentHex, 'eva');
+  rig.group.scale.setScalar(1.12);
+  addContactShadow(rig.group, 0.56, shadowTex);
+  tagInteractiveProxy(rig.group, 'crew', 1.1, 2.0, 1.1, proxies);
 
   return {
     name,
-    group,
-    leftLeg,
-    rightLeg,
-    leftArm,
-    rightArm,
-    suitAccentMat: suitAccent,
+    rig,
+    group: rig.group,
+    suitAccentMat: rig.accentMat,
     homePos,
     workPos,
   };
@@ -390,43 +291,72 @@ export function buildOutpostModules(
     depthWrite: false,
   });
 
-  // 1. HABITAT & RADIATION STORM SHELTER
+  // 1. LARGE MAIN SPACE STATION & STORM SHELTER (longer wings & taller multi-deck tower)
   const habitat = new THREE.Group();
   habitat.position.set(0, groundHeightAt(0, 0, site), 0);
-  addContactShadow(habitat, 4.6, textures.contactShadow);
+  addContactShadow(habitat, 8.8, textures.contactShadow);
 
-  const habPad = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 4.1, 0.35, 8), concretePadMat);
-  habPad.position.y = 0.175;
+  const habPad = new THREE.Mesh(new THREE.CylinderGeometry(6.8, 7.6, 0.45, 10), concretePadMat);
+  habPad.position.y = 0.225;
   habPad.castShadow = true;
   habPad.receiveShadow = true;
   habitat.add(habPad);
 
-  const habLowerRing = new THREE.Mesh(new THREE.CylinderGeometry(3.15, 3.3, 1.35, 16), hullMat);
-  habLowerRing.position.y = 1.02;
+  // Extended east-west plinth for elongated station wings
+  const wingPad = new THREE.Mesh(new THREE.BoxGeometry(19.2, 0.36, 5.2), concretePadMat);
+  wingPad.position.y = 0.18;
+  wingPad.receiveShadow = true;
+  habitat.add(wingPad);
+
+  // Lower pressurized command ring + upper command tier
+  const habLowerRing = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.7, 2.5, 20), hullMat);
+  habLowerRing.position.y = 1.65;
   habLowerRing.castShadow = true;
   habLowerRing.receiveShadow = true;
   habitat.add(habLowerRing);
 
+  const habUpperDeck = new THREE.Mesh(new THREE.CylinderGeometry(4.1, 4.45, 1.5, 20), darkMetalMat);
+  habUpperDeck.position.y = 3.55;
+  habUpperDeck.castShadow = true;
+  habitat.add(habUpperDeck);
+
+  // Towering geodesic main dome
   const habDome = new THREE.Mesh(
-    new THREE.SphereGeometry(3.05, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.48),
+    new THREE.SphereGeometry(4.1, 28, 18, 0, Math.PI * 2, 0, Math.PI * 0.48),
     hullMat
   );
-  habDome.position.y = 1.68;
+  habDome.position.y = 4.25;
   habDome.castShadow = true;
   habitat.add(habDome);
 
-  const cupolaRing = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.12, 10, 24), brushedGoldMat);
+  // Upper Observatory Cupola & Tall Station Sensor Mast (reaches ~11.4m height!)
+  const cupolaRing = new THREE.Mesh(new THREE.TorusGeometry(1.45, 0.16, 12, 28), brushedGoldMat);
   cupolaRing.rotation.x = Math.PI / 2;
-  cupolaRing.position.y = 4.62;
+  cupolaRing.position.y = 8.1;
   habitat.add(cupolaRing);
 
   const cupolaGlass = new THREE.Mesh(
-    new THREE.SphereGeometry(0.92, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.5),
+    new THREE.SphereGeometry(1.4, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.5),
     glassMat
   );
-  cupolaGlass.position.y = 4.62;
+  cupolaGlass.position.y = 8.1;
   cupolaGlass.renderOrder = 5;
   habitat.add(cupolaGlass);
+
+  const towerSpire = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.24, 2.4, 10), darkMetalMat);
+  towerSpire.position.set(0, 10.2, 0);
+  habitat.add(towerSpire);
+
+  const spireBeacon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.24, 12, 12),
+    new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      emissive: 0x0ea5e9,
+      emissiveIntensity: 1.8,
+    })
+  );
+  spireBeacon.position.set(0, 11.45, 0);
+  habitat.add(spireBeacon);
 
   const cabinGlowMat = new THREE.MeshStandardMaterial({
     color: 0xfef3c7,
@@ -434,23 +364,72 @@ export function buildOutpostModules(
     emissiveIntensity: 1.3,
     roughness: 0.2,
   });
-  for (let i = 0; i < 6; i++) {
-    const ang = (i / 6) * Math.PI * 2 + 0.3;
-    const win = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.42, 0.18), cabinGlowMat);
-    win.position.set(Math.cos(ang) * 3.16, 1.25, Math.sin(ang) * 3.16);
+  for (let i = 0; i < 8; i++) {
+    const ang = (i / 8) * Math.PI * 2 + 0.2;
+    const win = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.55, 0.2), cabinGlowMat);
+    win.position.set(Math.cos(ang) * 4.55, 2.1, Math.sin(ang) * 4.55);
     win.rotation.y = -ang + Math.PI / 2;
     habitat.add(win);
+
+    const upperWin = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.42, 0.18), cabinGlowMat);
+    upperWin.position.set(Math.cos(ang) * 4.22, 3.6, Math.sin(ang) * 4.22);
+    upperWin.rotation.y = -ang + Math.PI / 2;
+    habitat.add(upperWin);
   }
 
-  const airlock = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 2.2, 12), darkMetalMat);
-  airlock.rotation.z = Math.PI / 2;
-  airlock.position.set(3.6, 1.15, 0);
+  // Elongated East & West Pressurized Lab / Quarters Modules (gives real Station Length!)
+  [-1, 1].forEach((dir) => {
+    const tunnel = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.15, 2.2, 16), darkMetalMat);
+    tunnel.rotation.z = Math.PI / 2;
+    tunnel.position.set(dir * 4.9, 1.7, 0);
+    tunnel.castShadow = true;
+    habitat.add(tunnel);
+
+    const modulePod = new THREE.Mesh(new THREE.CylinderGeometry(1.85, 1.85, 4.8, 18), hullMat);
+    modulePod.rotation.z = Math.PI / 2;
+    modulePod.position.set(dir * 7.6, 2.05, 0);
+    modulePod.castShadow = true;
+    modulePod.receiveShadow = true;
+    habitat.add(modulePod);
+
+    const endBulkhead = new THREE.Mesh(
+      new THREE.SphereGeometry(1.82, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      darkMetalMat
+    );
+    endBulkhead.rotation.z = dir < 0 ? Math.PI / 2 : -Math.PI / 2;
+    endBulkhead.position.set(dir * 10.0, 2.05, 0);
+    habitat.add(endBulkhead);
+
+    for (const wx of [6.4, 8.8]) {
+      const podWin = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.48, 0.2), cabinGlowMat);
+      podWin.position.set(dir * wx, 2.2, 1.82);
+      habitat.add(podWin);
+    }
+
+    // Exterior Truss & Radiator Fin on roof of each module
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.08, 1.5), darkMetalMat);
+    fin.position.set(dir * 7.6, 4.15, 0);
+    habitat.add(fin);
+  });
+
+  // Forward South Storm-Shelter Airlock Entry (+Z facing player spawn!)
+  const airlock = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.5, 3.2), darkMetalMat);
+  airlock.position.set(0, 1.45, 5.2);
   airlock.castShadow = true;
   habitat.add(airlock);
 
-  const airlockDoor = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.4, 1.0), accentOrangeMat);
-  airlockDoor.position.set(4.65, 1.15, 0);
+  const airlockDoor = new THREE.Mesh(new THREE.BoxGeometry(1.75, 2.05, 0.25), accentOrangeMat);
+  airlockDoor.position.set(0, 1.25, 6.82);
   habitat.add(airlockDoor);
+
+  const shelterBeaconMat = new THREE.MeshStandardMaterial({
+    color: 0x22c55e,
+    emissive: 0x16a34a,
+    emissiveIntensity: 1.5,
+  });
+  const shelterArchLight = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.22, 0.28), shelterBeaconMat);
+  shelterArchLight.position.set(0, 2.52, 6.85);
+  habitat.add(shelterArchLight);
 
   const shieldShutters: THREE.Mesh[] = [];
   const shutterMat = new THREE.MeshStandardMaterial({
@@ -458,10 +437,10 @@ export function buildOutpostModules(
     roughness: 0.35,
     metalness: 0.7,
   });
-  for (let i = 0; i < 6; i++) {
-    const ang = (i / 6) * Math.PI * 2;
-    const shutter = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2, 0.14), shutterMat);
-    shutter.position.set(Math.cos(ang) * 3.25, 2.2, Math.sin(ang) * 3.25);
+  for (let i = 0; i < 8; i++) {
+    const ang = (i / 8) * Math.PI * 2;
+    const shutter = new THREE.Mesh(new THREE.BoxGeometry(1.85, 1.8, 0.18), shutterMat);
+    shutter.position.set(Math.cos(ang) * 4.65, 3.3, Math.sin(ang) * 4.65);
     shutter.rotation.y = -ang + Math.PI / 2;
     shutter.userData.baseAngle = ang;
     habitat.add(shutter);
@@ -469,7 +448,7 @@ export function buildOutpostModules(
   }
 
   const shieldBubble = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(4.3, 2),
+    new THREE.IcosahedronGeometry(7.2, 2),
     new THREE.MeshBasicMaterial({
       color: 0x38bdf8,
       wireframe: true,
@@ -478,62 +457,67 @@ export function buildOutpostModules(
       depthWrite: false,
     })
   );
-  shieldBubble.position.y = 1.6;
+  shieldBubble.position.y = 3.2;
   shieldBubble.renderOrder = 8;
   habitat.add(shieldBubble);
 
-  tagInteractiveProxy(habitat, 'habitat', 7.4, 5.4, 7.4, clickableProxies);
+  tagInteractiveProxy(habitat, 'habitat', 18.5, 9.6, 11.2, clickableProxies);
   outpostRoot.add(habitat);
 
-  // 2. HYDROPONICS GREENHOUSE
+  // 2. ATTACHED REALISTIC HYDROPONICS GREENHOUSE (physically connected to Station East Wing at 15.8, 0)
   const greenhouse = new THREE.Group();
-  greenhouse.position.set(7.2, groundHeightAt(7.2, 0, site), 0);
-  addContactShadow(greenhouse, 3.8, textures.contactShadow);
+  greenhouse.position.set(15.8, groundHeightAt(15.8, 0.0, site), 0.0);
+  addContactShadow(greenhouse, 4.8, textures.contactShadow);
 
-  const ghBase = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.45, 3.8), concretePadMat);
+  // Connecting Pressurized Airlock Tunnel straight into the Main Station East Bulkhead (x = 10.0 -> 12.2 world!)
+  const ghConnectTunnel = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.3, 1.3, 2.7, 16),
+    hullMat
+  );
+  ghConnectTunnel.rotation.z = Math.PI / 2;
+  ghConnectTunnel.position.set(-4.65, 1.75, 0);
+  ghConnectTunnel.castShadow = true;
+  greenhouse.add(ghConnectTunnel);
+
+  const ghConnectCollar = new THREE.Mesh(
+    new THREE.TorusGeometry(1.36, 0.14, 10, 20),
+    brushedGoldMat
+  );
+  ghConnectCollar.rotation.y = Math.PI / 2;
+  ghConnectCollar.position.set(-3.5, 1.75, 0);
+  greenhouse.add(ghConnectCollar);
+
+  const ghBase = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.45, 5.0), concretePadMat);
   ghBase.position.y = 0.225;
   ghBase.castShadow = true;
   ghBase.receiveShadow = true;
   greenhouse.add(ghBase);
 
-  const trayMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6, metalness: 0.4 });
-  for (const zOff of [-0.95, 0.95]) {
-    const tray = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.35, 1.15), trayMat);
-    tray.position.set(0, 0.62, zOff);
-    greenhouse.add(tray);
-  }
+  // Insulated lower hull perimeter skirt (back & side glazing framing)
+  const ghSkirt = new THREE.Mesh(new THREE.BoxGeometry(7.0, 0.45, 4.8), hullMat);
+  ghSkirt.position.y = 0.62;
+  greenhouse.add(ghSkirt);
 
-  const leafGeo = new THREE.DodecahedronGeometry(0.24, 0);
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.72, metalness: 0.02 });
-  const cropCount = 28;
-  const cropInstanced = new THREE.InstancedMesh(leafGeo, leafMat, cropCount);
-  const dummy = new THREE.Object3D();
-  for (let i = 0; i < cropCount; i++) {
-    const row = i < 14 ? -0.95 : 0.95;
-    const col = i % 14;
-    const xPos = -2.0 + (col % 7) * 0.66;
-    const zJitter = (Math.floor(col / 7) - 0.5) * 0.42;
-    dummy.position.set(xPos, 0.92, row + zJitter);
-    dummy.scale.setScalar(0.85 + (i % 3) * 0.15);
-    dummy.updateMatrix();
-    cropInstanced.setMatrixAt(i, dummy.matrix);
-    cropInstanced.setColorAt(i, new THREE.Color(i % 2 === 0 ? 0x22c55e : 0x4ade80));
-  }
-  cropInstanced.instanceMatrix.needsUpdate = true;
-  if (cropInstanced.instanceColor) cropInstanced.instanceColor.needsUpdate = true;
-  cropInstanced.computeBoundingSphere();
-  greenhouse.add(cropInstanced);
+  // 3 Raised Realistic Plant Beds visible clearly through the glass canopy!
+  const exteriorCropBedStages: Array<[THREE.Group, THREE.Group, THREE.Group]> = [];
+  [-1.35, 0, 1.35].forEach((bz) => {
+    const bed = buildRealisticCropBed(5.4, 0.88);
+    bed.group.position.set(0, 0.45, bz);
+    greenhouse.add(bed.group);
+    exteriorCropBedStages.push(bed.stageGroups);
+  });
 
+  // 7 Arched Rib Trusses + Steel Longitudinal Purlins
   const ribMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.28, metalness: 0.85 });
-  for (let i = -2; i <= 2; i++) {
+  for (let i = -3; i <= 3; i++) {
     const curve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(i * 1.25, 0.45, -1.8),
-      new THREE.Vector3(i * 1.25, 2.35, -1.2),
-      new THREE.Vector3(i * 1.25, 2.85, 0),
-      new THREE.Vector3(i * 1.25, 2.35, 1.2),
-      new THREE.Vector3(i * 1.25, 0.45, 1.8),
+      new THREE.Vector3(i * 1.12, 0.55, -2.38),
+      new THREE.Vector3(i * 1.12, 2.75, -1.6),
+      new THREE.Vector3(i * 1.12, 3.38, 0),
+      new THREE.Vector3(i * 1.12, 2.75, 1.6),
+      new THREE.Vector3(i * 1.12, 0.55, 2.38),
     ]);
-    const rib = new THREE.Mesh(new THREE.TubeGeometry(curve, 18, 0.07, 8, false), ribMat);
+    const rib = new THREE.Mesh(new THREE.TubeGeometry(curve, 20, 0.068, 8, false), ribMat);
     rib.castShadow = true;
     greenhouse.add(rib);
   }
@@ -544,30 +528,43 @@ export function buildOutpostModules(
     emissiveIntensity: 1.5,
     roughness: 0.2,
   });
-  const growBar = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.12, 0.25), growLightMat);
-  growBar.position.set(0, 2.45, 0);
-  greenhouse.add(growBar);
+  for (const gz of [-0.9, 0.9]) {
+    const growBar = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.12, 0.22), growLightMat);
+    growBar.position.set(0, 2.95, gz);
+    greenhouse.add(growBar);
+  }
 
-  const growPointLight = new THREE.PointLight(0xf0abfc, 2.2, 9);
-  growPointLight.position.set(0, 2.1, 0);
+  const growPointLight = new THREE.PointLight(0xf0abfc, 2.5, 11);
+  growPointLight.position.set(0, 2.4, 0);
   greenhouse.add(growPointLight);
 
-  const ghCanopyGeo = new THREE.CylinderGeometry(1.85, 1.85, 5.2, 20, 1, false, 0, Math.PI);
+  const ghCanopyGeo = new THREE.CylinderGeometry(2.38, 2.38, 6.85, 24, 1, false, 0, Math.PI);
   ghCanopyGeo.rotateZ(Math.PI / 2);
   ghCanopyGeo.rotateX(-Math.PI / 2);
   const ghCanopy = new THREE.Mesh(ghCanopyGeo, glassMat);
-  ghCanopy.position.set(0, 0.85, 0);
-  ghCanopy.scale.set(1, 1.15, 1);
+  ghCanopy.position.set(0, 0.88, 0);
+  ghCanopy.scale.set(1, 1.08, 1);
   ghCanopy.renderOrder = 6;
   greenhouse.add(ghCanopy);
 
-  tagInteractiveProxy(greenhouse, 'greenhouse', 5.8, 3.2, 4.0, clickableProxies);
+  // Exterior South Airlock Door on Greenhouse (+Z side for direct outdoor entrance!)
+  const ghDoorHousing = new THREE.Mesh(new THREE.BoxGeometry(2.0, 2.1, 0.9), darkMetalMat);
+  ghDoorHousing.position.set(0, 1.15, 2.52);
+  greenhouse.add(ghDoorHousing);
+  const ghDoorPanel = new THREE.Mesh(new THREE.BoxGeometry(1.35, 1.7, 0.2), accentOrangeMat);
+  ghDoorPanel.position.set(0, 1.05, 2.92);
+  greenhouse.add(ghDoorPanel);
+  const ghDoorLight = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.18, 0.22), shelterBeaconMat);
+  ghDoorLight.position.set(0, 2.04, 2.94);
+  greenhouse.add(ghDoorLight);
+
+  tagInteractiveProxy(greenhouse, 'greenhouse', 7.6, 3.6, 5.8, clickableProxies);
   outpostRoot.add(greenhouse);
 
-  // 3. SOLAR ARRAY FARM
+  // 3. 12-PANEL MARS SOLAR FARM (3 rows x 4 cols at -21.5, -10.0 + visible Mars Dust coat)
   const solar = new THREE.Group();
-  solar.position.set(-7.6, groundHeightAt(-7.6, -3.2, site), -3.2);
-  addContactShadow(solar, 4.0, textures.contactShadow);
+  solar.position.set(-21.5, groundHeightAt(-21.5, -10.0, site), -10.0);
+  addContactShadow(solar, 7.6, textures.contactShadow);
 
   const solarCellMat = new THREE.MeshStandardMaterial({
     map: textures.solarCell,
@@ -577,49 +574,78 @@ export function buildOutpostModules(
     emissiveIntensity: 0.15,
   });
 
+  const solarDustMat = new THREE.MeshStandardMaterial({
+    map: textures.marsGround,
+    color: 0xb95835,
+    roughness: 0.96,
+    metalness: 0.0,
+    transparent: true,
+    opacity: 0.0,
+  });
+
   const solarWings: THREE.Group[] = [];
-  for (let i = 0; i < 2; i++) {
-    const zPos = i === 0 ? -1.8 : 1.8;
-    const mastBase = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.6, 0.35, 8), concretePadMat);
-    mastBase.position.set(0, 0.175, zPos);
-    solar.add(mastBase);
+  const xCols = [-4.2, -1.4, 1.4, 4.2];
+  const zRows = [-3.4, 0, 3.4];
 
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 2.1, 10), darkMetalMat);
-    mast.position.set(0, 1.2, zPos);
-    mast.castShadow = true;
-    solar.add(mast);
+  zRows.forEach((zPos) => {
+    // Ground cable conduit connecting the 4 solar piers in this row
+    const rowRail = new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.12, 0.22), darkMetalMat);
+    rowRail.position.set(0, 0.06, zPos);
+    solar.add(rowRail);
 
-    const wingPivot = new THREE.Group();
-    wingPivot.position.set(0, 2.25, zPos);
+    xCols.forEach((xPos) => {
+      const mastBase = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.44, 0.28, 8), concretePadMat);
+      mastBase.position.set(xPos, 0.14, zPos);
+      solar.add(mastBase);
 
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.1, 2.1), darkMetalMat);
-    frame.castShadow = true;
-    wingPivot.add(frame);
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, 1.9, 8), darkMetalMat);
+      mast.position.set(xPos, 1.05, zPos);
+      mast.castShadow = true;
+      solar.add(mast);
 
-    const cells = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.12, 1.92), solarCellMat);
-    cells.position.y = 0.02;
-    wingPivot.add(cells);
+      const wingPivot = new THREE.Group();
+      wingPivot.position.set(xPos, 2.02, zPos);
 
-    solar.add(wingPivot);
-    solarWings.push(wingPivot);
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(2.45, 0.09, 2.25), darkMetalMat);
+      frame.castShadow = true;
+      wingPivot.add(frame);
+
+      const cells = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.11, 2.08), solarCellMat);
+      cells.position.y = 0.015;
+      wingPivot.add(cells);
+
+      // Matching Martian red-dust buildup layer on every one of the 12 panels
+      const dustSheet = new THREE.Mesh(new THREE.BoxGeometry(2.28, 0.13, 2.05), solarDustMat);
+      dustSheet.position.y = 0.03;
+      wingPivot.add(dustSheet);
+
+      solar.add(wingPivot);
+      solarWings.push(wingPivot);
+    });
+  });
+
+  // High-Voltage Battery Bank & Megapack Inverter Units on East edge of Solar Farm
+  for (const bz of [-1.5, 1.5]) {
+    const battRack = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.75, 2.2), hullMat);
+    battRack.position.set(6.2, 0.88, bz);
+    battRack.castShadow = true;
+    solar.add(battRack);
+
+    const battTrim = new THREE.Mesh(new THREE.BoxGeometry(1.56, 0.2, 2.26), brushedGoldMat);
+    battTrim.position.set(6.2, 1.62, bz);
+    solar.add(battTrim);
   }
+  const conduitTrunk = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.12, 0.28), accentOrangeMat);
+  conduitTrunk.position.set(7.8, 0.06, 0);
+  solar.add(conduitTrunk);
 
-  const battRack = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.4, 1.1), hullMat);
-  battRack.position.set(2.2, 0.7, 0);
-  battRack.castShadow = true;
-  solar.add(battRack);
-
-  const battTrim = new THREE.Mesh(new THREE.BoxGeometry(1.54, 0.2, 1.14), brushedGoldMat);
-  battTrim.position.set(2.2, 1.3, 0);
-  solar.add(battTrim);
-
-  tagInteractiveProxy(solar, 'solar', 6.5, 3.6, 6.2, clickableProxies);
+  tagInteractiveProxy(solar, 'solar', 12.6, 3.8, 9.8, clickableProxies);
   outpostRoot.add(solar);
 
-  // 4. LIFE SUPPORT & WATER RECYCLER
+  // 4. LIFE SUPPORT & WATER RECYCLER (spaced out to -14.0, 17.5)
   const lifesupport = new THREE.Group();
-  lifesupport.position.set(-4.2, groundHeightAt(-4.2, 5.8, site), 5.8);
-  addContactShadow(lifesupport, 3.2, textures.contactShadow);
+  lifesupport.position.set(-14.0, groundHeightAt(-14.0, 17.5, site), 17.5);
+  addContactShadow(lifesupport, 3.6, textures.contactShadow);
 
   const lsPad = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.35, 3.4), concretePadMat);
   lsPad.position.y = 0.175;
@@ -670,10 +696,10 @@ export function buildOutpostModules(
   tagInteractiveProxy(lifesupport, 'lifesupport', 4.6, 3.0, 3.6, clickableProxies);
   outpostRoot.add(lifesupport);
 
-  // 5. DEEP SPACE COMMS DISH
+  // 5. DEEP SPACE COMMS DISH (spaced out to 12.0, -19.0)
   const comms = new THREE.Group();
-  comms.position.set(3.2, groundHeightAt(3.2, -6.8, site), -6.8);
-  addContactShadow(comms, 2.6, textures.contactShadow);
+  comms.position.set(12.0, groundHeightAt(12.0, -19.0, site), -19.0);
+  addContactShadow(comms, 2.9, textures.contactShadow);
 
   const commsBase = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.6, 0.4, 8), concretePadMat);
   commsBase.position.y = 0.2;
@@ -739,73 +765,195 @@ export function buildOutpostModules(
   tagInteractiveProxy(comms, 'comms', 3.6, 4.8, 3.6, clickableProxies);
   outpostRoot.add(comms);
 
-  // 6. SCIENCE ROVER & DRILL
+  // 6. REALISTIC 6-WHEEL ROCKER-BOGIE MARS ROVER & RESEARCH DRILL (spaced out to 14.5, 18.0)
   const science = new THREE.Group();
-  science.position.set(4.8, groundHeightAt(4.8, 6.2, site), 6.2);
+  science.position.set(14.5, groundHeightAt(14.5, 18.0, site), 18.0);
 
   const roverGroup = new THREE.Group();
-  addContactShadow(roverGroup, 1.75, textures.contactShadow);
+  addContactShadow(roverGroup, 2.4, textures.contactShadow);
 
-  const roverBody = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.58, 2.05), hullMat);
-  roverBody.position.y = 0.72;
+  const titaniumStrutMat = new THREE.MeshStandardMaterial({
+    color: 0x94a3b8,
+    roughness: 0.34,
+    metalness: 0.82,
+  });
+  const tireMat = new THREE.MeshStandardMaterial({
+    color: 0x1e242c,
+    roughness: 0.72,
+    metalness: 0.38,
+  });
+
+  // Main aerospace fuselage warm-box chassis + gold Kapton thermal foil belly
+  const roverLowerChassis = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.38, 2.15), brushedGoldMat);
+  roverLowerChassis.position.y = 0.68;
+  roverLowerChassis.castShadow = true;
+  roverGroup.add(roverLowerChassis);
+
+  const roverBody = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.44, 2.28), hullMat);
+  roverBody.position.y = 0.98;
   roverBody.castShadow = true;
   roverGroup.add(roverBody);
 
-  const roverDeck = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.1, 1.6), brushedGoldMat);
-  roverDeck.position.y = 1.04;
+  const roverDeck = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.08, 1.95), darkMetalMat);
+  roverDeck.position.y = 1.24;
   roverGroup.add(roverDeck);
 
-  const mastPole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.85, 8), darkMetalMat);
-  mastPole.position.set(0.3, 1.45, 0.55);
+  // Differential suspension crossbar & top pivot
+  const diffBar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.85, 8), titaniumStrutMat);
+  diffBar.rotation.z = Math.PI / 2;
+  diffBar.position.set(0, 0.94, 0);
+  roverGroup.add(diffBar);
+
+  // Rear angled MMRTG nuclear power battery with cooling fins
+  const rtgGroup = new THREE.Group();
+  rtgGroup.position.set(0, 1.02, -1.25);
+  rtgGroup.rotation.x = -0.35;
+  const rtgCore = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.85, 12), darkMetalMat);
+  rtgCore.rotation.x = Math.PI / 2;
+  rtgGroup.add(rtgCore);
+  for (let f = 0; f < 6; f++) {
+    const finAng = (f / 6) * Math.PI * 2;
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.56, 0.75), brushedGoldMat);
+    fin.rotation.z = finAng;
+    rtgGroup.add(fin);
+  }
+  roverGroup.add(rtgGroup);
+
+  // High-Gain Parabolic Dish & UHF Antenna on rear deck
+  const hgaPole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.55, 8), titaniumStrutMat);
+  hgaPole.position.set(-0.42, 1.5, -0.58);
+  roverGroup.add(hgaPole);
+  const hgaDish = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.32, 0.08, 0.14, 16),
+    hullMat
+  );
+  hgaDish.position.set(-0.42, 1.78, -0.58);
+  hgaDish.rotation.x = -0.45;
+  roverGroup.add(hgaDish);
+
+  // White Mastcam Tower + Stereo Camera Head & Laser Eye
+  const mastPole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 1.0, 10), hullMat);
+  mastPole.position.set(0.36, 1.72, 0.72);
+  mastPole.castShadow = true;
   roverGroup.add(mastPole);
 
-  const camHead = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.24, 0.28), hullMat);
-  camHead.position.set(0.3, 1.88, 0.55);
+  const camHead = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.26, 0.34), hullMat);
+  camHead.position.set(0.36, 2.24, 0.74);
   roverGroup.add(camHead);
 
-  const lens = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.08, 0.08, 0.08, 12),
-    new THREE.MeshStandardMaterial({
-      color: 0x06b6d4,
-      emissive: 0x0891b2,
-      emissiveIntensity: 0.9,
-      roughness: 0.15,
-    })
-  );
-  lens.rotation.x = Math.PI / 2;
-  lens.position.set(0.3, 1.88, 0.71);
-  roverGroup.add(lens);
+  const lensMat = new THREE.MeshStandardMaterial({
+    color: 0x06b6d4,
+    emissive: 0x0ea5e9,
+    emissiveIntensity: 1.0,
+    roughness: 0.15,
+  });
+  [-0.14, 0.14].forEach((lx) => {
+    const eye = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.1, 12), lensMat);
+    eye.rotation.x = Math.PI / 2;
+    eye.position.set(0.36 + lx, 2.26, 0.92);
+    roverGroup.add(eye);
+  });
 
-  const roverWheels: THREE.Mesh[] = [];
-  const wheelGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.22, 16);
-  wheelGeo.rotateZ(Math.PI / 2);
-  for (const xSide of [-0.92, 0.92]) {
-    for (const zWheel of [-0.78, 0, 0.78]) {
-      const wheel = new THREE.Mesh(wheelGeo, darkMetalMat);
-      wheel.position.set(xSide, 0.28, zWheel);
-      wheel.castShadow = true;
-      roverGroup.add(wheel);
-      roverWheels.push(wheel);
+  // Visible Rocker-Bogie Suspension Linkages + 6 Spoked Grooved Wheels!
+  const roverWheels: THREE.Object3D[] = [];
+  [-1, 1].forEach((side) => {
+    const railX = side * 0.88;
+    const wheelX = side * 1.12;
+
+    // Main rocker arm pivot to rear hub & bogie pivot
+    const rearStrut = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 1.25), titaniumStrutMat);
+    rearStrut.position.set(railX, 0.62, -0.52);
+    rearStrut.rotation.x = 0.44;
+    roverGroup.add(rearStrut);
+
+    const frontBogie = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 1.15), titaniumStrutMat);
+    frontBogie.position.set(railX, 0.44, 0.56);
+    roverGroup.add(frontBogie);
+
+    const upperStrut = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.95), titaniumStrutMat);
+    upperStrut.position.set(railX, 0.74, 0.28);
+    upperStrut.rotation.x = -0.52;
+    roverGroup.add(upperStrut);
+
+    for (const zWheel of [-1.05, 0.02, 1.08]) {
+      const hubDrop = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.34, 0.08), titaniumStrutMat);
+      hubDrop.position.set(railX, 0.44, zWheel);
+      roverGroup.add(hubDrop);
+
+      const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.28, 8), darkMetalMat);
+      axle.rotation.z = Math.PI / 2;
+      axle.position.set(side * 1.0, 0.34, zWheel);
+      roverGroup.add(axle);
+
+      // Spoked wheel assembly (rotates cleanly!)
+      const wheelPivot = new THREE.Group();
+      wheelPivot.position.set(wheelX, 0.34, zWheel);
+
+      const tireRim = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.34, 0.34, 0.26, 20, 1, true),
+        tireMat
+      );
+      tireRim.rotation.z = Math.PI / 2;
+      tireRim.castShadow = true;
+      wheelPivot.add(tireRim);
+
+      const innerDrum = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.22, 0.2, 14),
+        titaniumStrutMat
+      );
+      innerDrum.rotation.z = Math.PI / 2;
+      wheelPivot.add(innerDrum);
+
+      const driveHub = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.11, 0.11, 0.28, 12),
+        accentOrangeMat
+      );
+      driveHub.rotation.z = Math.PI / 2;
+      wheelPivot.add(driveHub);
+
+      // Visible tire treads / grouser cleats & wheel spokes
+      for (let t = 0; t < 8; t++) {
+        const ang = (t / 8) * Math.PI * 2;
+        const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.045, 0.055), titaniumStrutMat);
+        cleat.position.set(0, Math.cos(ang) * 0.35, Math.sin(ang) * 0.35);
+        cleat.rotation.x = -ang;
+        wheelPivot.add(cleat);
+      }
+      for (let sIdx = 0; sIdx < 3; sIdx++) {
+        const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.48, 0.04), titaniumStrutMat);
+        spoke.position.x = side * 0.11;
+        spoke.rotation.x = (sIdx * Math.PI) / 3;
+        wheelPivot.add(spoke);
+      }
+
+      roverGroup.add(wheelPivot);
+      roverWheels.push(wheelPivot);
     }
-  }
+  });
 
+  // Articulated Front Robotic Sampling Arm + Rotary Core Drill
   const roverArm = new THREE.Group();
-  roverArm.position.set(-0.25, 0.75, 1.02);
-  const armSeg1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.75), accentOrangeMat);
-  armSeg1.position.z = 0.35;
+  roverArm.position.set(-0.26, 0.94, 1.15);
+  const armJoint1 = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 10), titaniumStrutMat);
+  roverArm.add(armJoint1);
+  const armSeg1 = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.85), accentOrangeMat);
+  armSeg1.position.z = 0.42;
   roverArm.add(armSeg1);
-  const drillHead = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.36, 8), darkMetalMat);
+  const armJoint2 = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.22, 12), titaniumStrutMat);
+  armJoint2.position.z = 0.86;
+  roverArm.add(armJoint2);
+  const drillHead = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.42, 10), darkMetalMat);
   drillHead.rotation.x = Math.PI / 2;
-  drillHead.position.z = 0.85;
+  drillHead.position.z = 1.08;
   roverArm.add(drillHead);
   roverGroup.add(roverArm);
 
   science.add(roverGroup);
-  tagInteractiveProxy(science, 'science', 3.4, 2.5, 3.6, clickableProxies);
+  tagInteractiveProxy(science, 'science', 4.4, 3.0, 4.6, clickableProxies);
   outpostRoot.add(science);
 
-  // 7. LANDING PAD & ARRIVAL SPACECRAFT (x: 8.8, z: -6.2)
-  const landingPadPos = new THREE.Vector3(8.8, groundHeightAt(8.8, -6.2, site), -6.2);
+  // 7. LANDING PAD & ARRIVAL SPACECRAFT (spaced out to 22.5, -17.5)
+  const landingPadPos = new THREE.Vector3(22.5, groundHeightAt(22.5, -17.5, site), -17.5);
   const padGroup = new THREE.Group();
   padGroup.position.copy(landingPadPos);
 
@@ -842,15 +990,20 @@ export function buildOutpostModules(
   landedShip.group.position.y += 0.25;
   outpostRoot.add(landedShip.group);
 
-  // 8. PLAYABLE PLAYER (Commander Maya) & NPC TEAMMATES (Leo & Zara)
+  const rescueShip = buildSpacecraft(textures, true);
+  rescueShip.group.position.set(landingPadPos.x - 6.5, landingPadPos.y + 28, landingPadPos.z - 2.0);
+  rescueShip.group.visible = false;
+  outpostRoot.add(rescueShip.group);
+
+  // 8. PLAYABLE PLAYER (Commander Maya) spawning in front of Main Station Shelter Airlock
   const crewGroup = new THREE.Group();
   const playerAstro = createAstronaut(
     'Commander Maya',
     0xea580c,
     textures.contactShadow,
     clickableProxies,
-    new THREE.Vector2(1.4, 4.4),
-    new THREE.Vector2(2.6, 5.2)
+    new THREE.Vector2(0, 7.6),
+    new THREE.Vector2(0, 9.2)
   );
   playerAstro.group.position.set(
     playerAstro.workPos.x,
@@ -886,21 +1039,21 @@ export function buildOutpostModules(
   // Subtle ground interaction rings around the 6 outpost stations
   const stationRings: Record<string, THREE.Mesh> = {};
   const stationRingConfigs: Array<{ id: string; x: number; z: number; r: number }> = [
-    { id: 'habitat', x: 0, z: 0, r: 4.5 },
-    { id: 'greenhouse', x: 7.2, z: 0, r: 3.6 },
-    { id: 'solar', x: -7.6, z: -3.2, r: 3.8 },
-    { id: 'lifesupport', x: -4.2, z: 5.8, r: 3.3 },
-    { id: 'comms', x: 3.2, z: -6.8, r: 2.5 },
-    { id: 'science', x: 4.8, z: 6.2, r: 2.8 },
+    { id: 'habitat', x: 0, z: 0, r: 8.4 },
+    { id: 'greenhouse', x: 15.8, z: 0.0, r: 4.8 },
+    { id: 'solar', x: -21.5, z: -10.0, r: 7.4 },
+    { id: 'lifesupport', x: -14.0, z: 17.5, r: 4.1 },
+    { id: 'comms', x: 12.0, z: -19.0, r: 3.3 },
+    { id: 'science', x: 14.5, z: 18.0, r: 3.8 },
   ];
   stationRingConfigs.forEach((cfg) => {
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(cfg.r - 0.14, cfg.r, 48),
+      new THREE.RingGeometry(cfg.r - 0.18, cfg.r, 56),
       new THREE.MeshBasicMaterial({
         color: 0x38bdf8,
         side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.2,
       })
     );
     ring.rotation.x = -Math.PI / 2;
@@ -909,35 +1062,38 @@ export function buildOutpostModules(
     stationRings[cfg.id] = ring;
   });
 
-  // Collectible 3D Martian/Lunar Field Samples & Resource Caches
+  // Collectible 3D Martian Research Rocks (default Martian rock texture & iron-oxide rust color — no green!)
   const sampleNodes: Record<string, THREE.Group> = {};
-  FIELD_SAMPLES.forEach((smp) => {
+  FIELD_SAMPLES.forEach((smp, idx) => {
     const smpGroup = new THREE.Group();
     const sy = groundHeightAt(smp.x, smp.z, site);
     smpGroup.position.set(smp.x, sy, smp.z);
 
-    const crystal = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.45, 0),
+    const rockSpecimen = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.62, 1),
       new THREE.MeshStandardMaterial({
         color: smp.colorHex,
-        emissive: smp.colorHex,
-        emissiveIntensity: 0.9,
-        roughness: 0.15,
-        metalness: 0.25,
+        map: textures.marsRockMap,
+        bumpMap: textures.marsRockBump,
+        bumpScale: 0.18,
+        roughness: 0.88,
+        metalness: 0.06,
       })
     );
-    crystal.position.y = 0.85;
-    crystal.castShadow = true;
-    crystal.userData.isCrystal = true;
-    smpGroup.add(crystal);
+    rockSpecimen.scale.set(1.22, 0.78, 1.04);
+    rockSpecimen.rotation.set(idx * 0.7, idx * 1.3, idx * 0.4);
+    rockSpecimen.position.y = 0.62;
+    rockSpecimen.castShadow = true;
+    rockSpecimen.userData.isCrystal = true;
+    smpGroup.add(rockSpecimen);
 
     const haloRing = new THREE.Mesh(
-      new THREE.RingGeometry(0.65, 0.86, 28),
+      new THREE.RingGeometry(0.82, 1.02, 28),
       new THREE.MeshBasicMaterial({
-        color: smp.colorHex,
+        color: 0xd97745,
         side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.72,
+        opacity: 0.65,
       })
     );
     haloRing.rotation.x = -Math.PI / 2;
@@ -945,16 +1101,16 @@ export function buildOutpostModules(
     smpGroup.add(haloRing);
 
     const beaconBeam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.04, 0.16, 2.4, 10, 1, true),
+      new THREE.CylinderGeometry(0.03, 0.14, 2.2, 10, 1, true),
       new THREE.MeshBasicMaterial({
-        color: smp.colorHex,
+        color: 0xea580c,
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.18,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
     );
-    beaconBeam.position.y = 1.2;
+    beaconBeam.position.y = 1.1;
     smpGroup.add(beaconBeam);
 
     outpostRoot.add(smpGroup);
@@ -1005,9 +1161,10 @@ export function buildOutpostModules(
     cabinGlowMat,
     solarWings,
     solarCellMat,
+    solarDustMat,
     growLightMat,
     growPointLight,
-    cropInstanced,
+    exteriorCropBedStages,
     lifeFan,
     commsHead,
     commsBeaconMat,
@@ -1023,6 +1180,7 @@ export function buildOutpostModules(
     walkTargetRing,
     landingPadPos,
     landedShip,
+    rescueShip,
     selectionRing,
   };
 }

@@ -29,6 +29,8 @@ export interface ChapterSpec {
   subtitles: SubtitleBeat[];
 }
 
+export const LAUNCH_IGNITION_TIME = 7.0;
+
 export const CUTSCENE_CHAPTERS: ChapterSpec[] = [
   {
     id: 'earth_farewell',
@@ -38,16 +40,16 @@ export const CUTSCENE_CHAPTERS: ChapterSpec[] = [
     duration: 9.5,
     subtitles: [
       {
-        at: 0.3,
-        duration: 4.1,
+        at: 0.05,
+        duration: 4.5,
         speaker: 'CDR. VANCE',
-        text: 'Ares Four crew, suit pressure nominal, green across all seals. Proceeding down Wing B gantry.',
+        text: 'Houston Flight, Ares Four crew is sealed green across all suits. Proceeding down Wing B gantry now.',
       },
       {
-        at: 4.9,
-        duration: 4.2,
+        at: 4.8,
+        duration: 4.4,
         speaker: 'FLIGHT CONTROL',
-        text: 'Launch Control copies. Fuel cells topped, guidance aligned. Eight months to Mars—godspeed, Ares Four.',
+        text: 'Copy Ares Four. Fuel cells topped, guidance aligned. Eight months to Mars—godspeed, crew.',
       },
     ],
   },
@@ -77,22 +79,28 @@ export const CUTSCENE_CHAPTERS: ChapterSpec[] = [
     index: 3,
     title: 'Booster Ignition & Liftoff',
     location: 'Launch Pad 39C · Earth Ascent',
-    duration: 14.5,
+    duration: 16.0,
     subtitles: [
       {
-        at: 0.15,
-        duration: 5.1,
+        at: 0.05,
+        duration: 1.4,
         speaker: 'CAPCOM',
-        text: 'All stations go for launch. Terminal count... Five... Four... Three... Two... One... Main engine start!',
+        text: 'Ares Four, all stations go for launch.',
       },
       {
-        at: 5.4,
+        at: 1.5,
+        duration: 5.5,
+        speaker: 'CAPCOM',
+        text: 'T-minus Five... Four... Three... Two... One... Main engine start!',
+      },
+      {
+        at: 7.05,
         duration: 4.1,
         speaker: 'CDR. VANCE',
         text: 'Ignition confirmed! Solid boosters lit—we have liftoff! Clearing the launch tower now.',
       },
       {
-        at: 9.8,
+        at: 11.4,
         duration: 4.4,
         speaker: 'ENG. MORALES',
         text: 'Passing Max-Q. Booster separation clean—leaving Earth gravity well.',
@@ -303,7 +311,7 @@ export function resolveCutsceneState(elapsedSeconds: number): ChapterLookup {
 
 /**
  * Returns countdown integer (5..1) during Launch phase before liftoff, or 0 once ignited.
- * Liftoff happens at localTime = 5.4s in the 'launch' chapter.
+ * Liftoff happens at LAUNCH_IGNITION_TIME (7.0s) in the 'launch' chapter, with 1.1s per step.
  */
 export function getLaunchCountdownValue(launchLocalTime: number): {
   count: number;
@@ -311,17 +319,16 @@ export function getLaunchCountdownValue(launchLocalTime: number): {
   altitudeKm: number;
   velocityKms: number;
 } {
-  const ignitionTime = 5.4;
-  if (launchLocalTime < 0.4) {
+  if (launchLocalTime < 1.5) {
     return { count: 5, ignited: false, altitudeKm: 0, velocityKms: 0 };
   }
-  if (launchLocalTime < ignitionTime) {
-    const remaining = ignitionTime - launchLocalTime;
-    const count = Math.max(1, Math.min(5, Math.ceil(remaining)));
+  if (launchLocalTime < LAUNCH_IGNITION_TIME) {
+    const remaining = LAUNCH_IGNITION_TIME - launchLocalTime;
+    const count = Math.max(1, Math.min(5, Math.ceil(remaining / 1.1)));
     return { count, ignited: false, altitudeKm: 0, velocityKms: 0 };
   }
-  const flightTime = launchLocalTime - ignitionTime;
-  const norm = Math.min(1, flightTime / 9.1);
+  const flightTime = launchLocalTime - LAUNCH_IGNITION_TIME;
+  const norm = Math.min(1, flightTime / 9.0);
   const altitudeKm = Math.round(Math.pow(norm, 2.2) * 210);
   const velocityKms = Number((Math.pow(norm, 1.5) * 7.8).toFixed(1));
   return { count: 0, ignited: true, altitudeKm, velocityKms };

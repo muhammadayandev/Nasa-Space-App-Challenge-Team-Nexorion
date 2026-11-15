@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   CUTSCENE_CHAPTERS,
+  LAUNCH_IGNITION_TIME,
   TOTAL_CUTSCENE_DURATION,
   createInitialObjectives,
   evaluateObjectivesAtPosition,
@@ -1075,37 +1076,37 @@ export class CutsceneEngine {
       const { count, ignited } = getLaunchCountdownValue(lt);
       this.sound.updateCutsceneAudio(id, lt, count, ignited, subKey, subTone, subSpeaker, subText);
 
-      // Retract crew access arm at T-2s
-      const armRetract = THREE.MathUtils.clamp((lt - 3.2) / 1.8, 0, 1);
+      // Retract crew access arm at T-3s
+      const armRetract = THREE.MathUtils.clamp((lt - 4.2) / 2.2, 0, 1);
       this.earthComplex.accessArm.rotation.y = armRetract * 1.15;
 
       if (!ignited) {
         this.earthRocket.group.position.set(0, 1.45, 0);
         this.earthRocket.flames.forEach((f) => (f.visible = false));
-        this.exhaustParticles.visible = lt > 4.6;
+        this.exhaustParticles.visible = lt > LAUNCH_IGNITION_TIME - 1.0;
         // Dramatic low-angle pad view looking up at Ares IV during countdown
-        const shake = lt > 4.6 ? (Math.random() - 0.5) * 0.08 : 0;
+        const shake = lt > LAUNCH_IGNITION_TIME - 1.0 ? (Math.random() - 0.5) * 0.08 : 0;
         this.camera.position.set(14 + shake, 4.2 + shake, 19);
         this.camera.fov = 58;
         this.camera.updateProjectionMatrix();
         this.camera.lookAt(0, 9.5, 0);
       } else {
-        const ft = lt - 5.4;
+        const ft = lt - LAUNCH_IGNITION_TIME;
         const rocketY = 1.45 + Math.pow(ft, 2.25) * 2.4;
         this.earthRocket.group.position.set(0, rocketY, 0);
         this.earthRocket.flames.forEach((f, idx) => {
           f.visible = true;
           const flicker = 0.88 + Math.random() * 0.28;
           f.scale.set(1, flicker, 1);
-          if (idx > 0 && ft > 6.2) {
-            // Side SRB boosters detach at ft > 6.2s!
+          if (idx > 0 && ft > 4.6) {
+            // Side SRB boosters detach at ft > 4.6s (lt ~ 11.6s)!
             f.visible = false;
           }
         });
 
         // Booster separation animation
-        if (ft > 6.2) {
-          const sepT = ft - 6.2;
+        if (ft > 4.6) {
+          const sepT = ft - 4.6;
           this.earthRocket.boosters.forEach((b, idx) => {
             const dir = idx === 0 ? -1 : 1;
             b.position.set(dir * (2.75 + sepT * 3.8), -sepT * sepT * 2.2, 0);

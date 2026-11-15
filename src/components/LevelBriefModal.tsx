@@ -1,13 +1,20 @@
 import React from 'react';
-import { Play } from 'lucide-react';
+import { FastForward, Play, SkipForward } from 'lucide-react';
 import { GameLevelSpec } from '../data/missionScenarios';
 
 interface LevelBriefModalProps {
   level: GameLevelSpec;
   onStart: () => void;
+  onSkipTutorial: () => void;
+  onSkipAllTutorials: () => void;
 }
 
-export const LevelBriefModal: React.FC<LevelBriefModalProps> = ({ level, onStart }) => {
+export const LevelBriefModal: React.FC<LevelBriefModalProps> = ({
+  level,
+  onStart,
+  onSkipTutorial,
+  onSkipAllTutorials,
+}) => {
   return (
     <div
       className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
@@ -21,7 +28,7 @@ export const LevelBriefModal: React.FC<LevelBriefModalProps> = ({ level, onStart
         </div>
 
         <p className="mt-4 text-xs font-extrabold uppercase tracking-widest text-amber-400">
-          Level {level.id} of 5 · {level.maxDays} Days
+          Tutorial {level.id} of 5 · {level.maxDays} Days
         </p>
 
         <h2
@@ -55,6 +62,25 @@ export const LevelBriefModal: React.FC<LevelBriefModalProps> = ({ level, onStart
           <Play className="h-5 w-5 fill-slate-950" />
           <span>Let&apos;s Go!</span>
         </button>
+
+        <div className="mt-3 grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={onSkipTutorial}
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 py-2.5 text-xs font-bold text-slate-200 hover:border-amber-400 hover:text-amber-300 transition-colors"
+          >
+            <SkipForward className="h-3.5 w-3.5" />
+            <span>Skip Tutorial</span>
+          </button>
+          <button
+            type="button"
+            onClick={onSkipAllTutorials}
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-cyan-500/40 bg-cyan-950/50 py-2.5 text-xs font-bold text-cyan-200 hover:border-cyan-400 hover:bg-cyan-900/60 transition-colors"
+          >
+            <FastForward className="h-3.5 w-3.5" />
+            <span>Skip All Tutorials</span>
+          </button>
+        </div>
       </div>
     </div>
   );

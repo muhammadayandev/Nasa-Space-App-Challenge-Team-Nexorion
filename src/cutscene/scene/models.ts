@@ -31,6 +31,7 @@ export interface AstronautRig {
   rightShoulder: THREE.Group;
   rightElbow: THREE.Group;
   head: THREE.Group;
+  accentMat: THREE.MeshStandardMaterial;
 }
 
 function createRoundedPackGeometry(width: number, height: number, depth: number, radius: number): THREE.ExtrudeGeometry {
@@ -327,6 +328,7 @@ export function createAstronaut(
     rightShoulder: rightArmParts.shoulder,
     rightElbow: rightArmParts.elbow,
     head,
+    accentMat,
   };
 }
 
@@ -821,9 +823,12 @@ export function createMarsEnvironment(textures: ProceduralTextureSet): MarsEnvir
   // Instanced Martian Rocks & Boulders across the valley
   const rockGeo = new THREE.DodecahedronGeometry(1, 0);
   const rockMat = new THREE.MeshStandardMaterial({
-    color: 0x6e311d,
-    roughness: 0.9,
-    metalness: 0.04,
+    color: 0xffffff,
+    map: textures.marsRockMap,
+    bumpMap: textures.marsRockBump,
+    bumpScale: 0.16,
+    roughness: 0.92,
+    metalness: 0.03,
   });
   const rockCount = 160;
   const rocks = new THREE.InstancedMesh(rockGeo, rockMat, rockCount);

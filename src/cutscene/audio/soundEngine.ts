@@ -1,4 +1,5 @@
 import { CUTSCENE_CHAPTERS, type ChapterId } from '../timeline';
+import { VOICE_CLIP_BY_CUTSCENE_KEY } from '../../data/voiceManifest';
 
 type AllowedVoice = 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
 
@@ -61,12 +62,15 @@ export class SoundEngine {
   private rawWavCache = new Map<string, ArrayBuffer>();
   private voiceBufferCache = new Map<string, AudioBuffer>();
   private voiceInFlight = new Map<string, Promise<ArrayBuffer | null>>();
+  private missingStaticClips = new Set<string>();
   private prefetchStarted = false;
   private ttsUnavailable = true;
 
   private muted = false;
   private initialized = false;
+  private cachedMaleVoice: SpeechSynthesisVoice | null = null;
   private lastCountdownBeep = -1;
+  private lastCountdownSpoken = -1;
   private lastChapter: ChapterId | null = null;
   private lastSubtitleKey = '';
   private lastWalkTick = -1;
@@ -82,6 +86,17 @@ export class SoundEngine {
       .userActivation;
     if (!fromUserGesture && activation && !activation.hasBeenActive) {
       return;
+    }
+
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        this.selectMaleRadioVoice();
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      } catch {
+        // Ignore restricted speech synthesis
+      }
     }
 
     if (this.initialized && this.ctx) {
@@ -188,39 +203,39 @@ export class SoundEngine {
       padOsc2.start();
       padOsc3.start();
 
-      // 4. Aviation / Pilot VHF Cockpit Radio DSP Chain (340Hz HP -> 1.48kHz presence -> 2.9kHz LP -> soft overdrive -> AGC)
+      // 4. Warm NASA Aviation Radio DSP Chain (210Hz HP -> 1.6kHz clarity -> 4.2kHz LP -> gentle compression)
       const radioInput = ctx.createGain();
       radioInput.gain.value = 1.0;
 
       const radioHP = ctx.createBiquadFilter();
       radioHP.type = 'highpass';
-      radioHP.frequency.value = 340;
-      radioHP.Q.value = 0.85;
+      radioHP.frequency.value = 210;
+      radioHP.Q.value = 0.7;
 
       const radioMid = ctx.createBiquadFilter();
       radioMid.type = 'peaking';
-      radioMid.frequency.value = 1480;
-      radioMid.Q.value = 1.05;
-      radioMid.gain.value = 6.5;
+      radioMid.frequency.value = 1650;
+      radioMid.Q.value = 0.9;
+      radioMid.gain.value = 3.2;
 
       const radioLP = ctx.createBiquadFilter();
       radioLP.type = 'lowpass';
-      radioLP.frequency.value = 2900;
-      radioLP.Q.value = 1.05;
+      radioLP.frequency.value = 4200;
+      radioLP.Q.value = 0.85;
 
       const radioShaper = ctx.createWaveShaper();
-      radioShaper.curve = makeRadioDriveCurve(2.2);
+      radioShaper.curve = makeRadioDriveCurve(0.45);
       radioShaper.oversample = '2x';
 
       const radioComp = ctx.createDynamicsCompressor();
-      radioComp.threshold.value = -20;
-      radioComp.knee.value = 10;
-      radioComp.ratio.value = 8;
-      radioComp.attack.value = 0.004;
-      radioComp.release.value = 0.12;
+      radioComp.threshold.value = -18;
+      radioComp.knee.value = 12;
+      radioComp.ratio.value = 5;
+      radioComp.attack.value = 0.005;
+      radioComp.release.value = 0.14;
 
       const radioOutGain = ctx.createGain();
-      radioOutGain.gain.value = 1.25;
+      radioOutGain.gain.value = 1.18;
 
       radioInput.connect(radioHP);
       radioHP.connect(radioMid);
@@ -255,6 +270,13 @@ export class SoundEngine {
       this.radioInput = radioInput;
       this.radioHissGain = radioHissGain;
       this.initialized = true;
+
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        this.selectMaleRadioVoice();
+        window.speechSynthesis.onvoiceschanged = () => {
+          this.selectMaleRadioVoice();
+        };
+      }
 
       if (ctx.state === 'suspended') {
         void ctx.resume();
@@ -355,12 +377,44 @@ export class SoundEngine {
     return job;
   }
 
+  private async tryFetchStaticClip(filePath: string): Promise<AudioBuffer | null> {
+    if (this.missingStaticClips.has(filePath) || !this.ctx) return null;
+    const cached = this.voiceBufferCache.get(filePath);
+    if (cached) return cached;
+
+    try {
+      const res = await fetch(filePath);
+      const ctype = res.headers.get('content-type') || '';
+      if (!res.ok || ctype.includes('text/html')) {
+        this.missingStaticClips.add(filePath);
+        return null;
+      }
+      const arr = await res.arrayBuffer();
+      if (arr.byteLength < 128) {
+        this.missingStaticClips.add(filePath);
+        return null;
+      }
+      const decoded = await this.ctx.decodeAudioData(arr);
+      this.voiceBufferCache.set(filePath, decoded);
+      return decoded;
+    } catch {
+      this.missingStaticClips.add(filePath);
+      return null;
+    }
+  }
+
   private async getDecodedVoiceBuffer(
     cueKey: string,
     speaker: string,
     text: string,
     tone: 'normal' | 'alert' | 'critical'
   ): Promise<AudioBuffer | null> {
+    const staticSpec = VOICE_CLIP_BY_CUTSCENE_KEY.get(cueKey);
+    if (staticSpec) {
+      const customBuf = await this.tryFetchStaticClip(staticSpec.file);
+      if (customBuf) return customBuf;
+    }
+
     const cachedBuf = this.voiceBufferCache.get(cueKey);
     if (cachedBuf) return cachedBuf;
     if (!this.ctx) return null;
@@ -415,11 +469,38 @@ export class SoundEngine {
     void worker();
   }
 
+  private selectMaleRadioVoice(): SpeechSynthesisVoice | null {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices || voices.length === 0) return this.cachedMaleVoice;
+
+    const english = voices.filter((v) => v.lang.toLowerCase().startsWith('en'));
+    const pool = english.length > 0 ? english : voices;
+
+    const femalePattern =
+      /\b(zira|hazel|susan|eva|aria|jenny|michelle|samantha|victoria|karen|moira|tessa|fiona|kate|female|woman)\b/i;
+    const malePattern =
+      /\b(david|mark|george|ryan|guy|andrew|brian|christopher|eric|roger|daniel|alex|arthur|james|matthew|richard|ravi|thomas|male)\b/i;
+
+    const nonFemale = pool.filter((v) => !femalePattern.test(v.name));
+    const chosen =
+      nonFemale.find((v) => malePattern.test(v.name) && /online|natural/i.test(v.name)) ||
+      nonFemale.find((v) => malePattern.test(v.name)) ||
+      nonFemale[0] ||
+      pool[0] ||
+      null;
+
+    if (chosen) this.cachedMaleVoice = chosen;
+    return chosen;
+  }
+
   private speakBrowserFallback(
     token: number,
     speaker: string,
     text: string,
-    tone: 'normal' | 'alert' | 'critical'
+    tone: 'normal' | 'alert' | 'critical',
+    rateOverride?: number,
+    pitchOverride?: number
   ): void {
     if (
       typeof window === 'undefined' ||
@@ -431,20 +512,38 @@ export class SoundEngine {
     }
 
     try {
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = speaker === 'CAPCOM' ? 1.04 : tone === 'critical' ? 1.12 : 1.0;
-      utter.pitch = speaker === 'DR. LIN' ? 1.18 : 0.94;
-      utter.volume = 0.85;
+      const cleanText = text.replace(/—/g, ', ').replace(/\.\.\./g, ', ');
+      const utter = new SpeechSynthesisUtterance(cleanText);
+      const maleVoice = this.selectMaleRadioVoice();
+      if (maleVoice) utter.voice = maleVoice;
+
+      const isNaturalVoice = maleVoice ? /online|natural|neural|google/i.test(maleVoice.name) : false;
+      utter.rate =
+        rateOverride ?? (speaker === 'CAPCOM' ? 0.99 : tone === 'critical' ? 1.06 : 0.97);
+      // Keep natural formants clean without robotic pitch-shift distortion
+      const baseMalePitch = isNaturalVoice ? 0.93 : 0.87;
+      utter.pitch =
+        pitchOverride ??
+        (speaker === 'DR. LIN' || speaker === 'WEATHER ALERT'
+          ? 1.04
+          : baseMalePitch);
+      utter.volume = 0.94;
 
       const now = this.ctx.currentTime;
-      this.radioHissGain?.gain.setTargetAtTime(0.035, now, 0.02);
+      this.radioHissGain?.gain.setTargetAtTime(0.014, now, 0.02);
+
+      utter.onstart = () => {
+        if (token !== this.activeVoiceToken) return;
+        // Crisp NASA Quindar intro pip
+        this.playTone(2524, 0.036, 'sine', 0.06, 0);
+      };
 
       utter.onend = () => {
         if (this.ctx && this.radioHissGain) {
           this.radioHissGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.03);
         }
         if (token === this.activeVoiceToken) {
-          this.playNoiseBurst(0.055, 'bandpass', 2100, 0.09);
+          this.playTone(2475, 0.032, 'sine', 0.05, 0);
         }
       };
       utter.onerror = () => {
@@ -459,6 +558,55 @@ export class SoundEngine {
     }
   }
 
+  private async playCountdownRadioWord(count: number): Promise<void> {
+    if (!this.ensurePlayable() || !this.ctx || !this.radioInput) return;
+    const words: Record<number, string> = {
+      5: 'T-minus five.',
+      4: 'Four.',
+      3: 'Three.',
+      2: 'Two.',
+      1: 'One.',
+    };
+    const word = words[count];
+    if (!word) return;
+    this.stopActiveVoice();
+    const token = this.activeVoiceToken;
+    const customClip = await this.tryFetchStaticClip(`/audio/voiceovers/countdown_${count}.mp3`);
+    if (token !== this.activeVoiceToken || !this.ensurePlayable() || !this.ctx || !this.radioInput) {
+      return;
+    }
+    if (customClip) {
+      this.playBufferThroughRadio(customClip, token);
+      return;
+    }
+    this.speakBrowserFallback(token, 'CAPCOM', word, 'normal', 1.04, 0.88);
+  }
+
+  private playBufferThroughRadio(buffer: AudioBuffer, token: number): void {
+    if (!this.ctx || !this.radioInput) return;
+    const now = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(this.radioInput);
+    this.activeVoiceSrc = src;
+
+    this.radioHissGain?.gain.setTargetAtTime(0.012, now, 0.02);
+
+    src.onended = () => {
+      if (this.activeVoiceSrc === src) {
+        this.activeVoiceSrc = null;
+      }
+      if (this.ctx && this.radioHissGain) {
+        this.radioHissGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.03);
+      }
+      if (token === this.activeVoiceToken) {
+        this.playTone(2475, 0.03, 'sine', 0.045, 0);
+      }
+    };
+
+    src.start(now + 0.05);
+  }
+
   private async playRadioVoiceover(
     cueKey: string,
     speaker: string,
@@ -469,6 +617,20 @@ export class SoundEngine {
 
     this.stopActiveVoice();
     const token = this.activeVoiceToken;
+    const staticSpec = VOICE_CLIP_BY_CUTSCENE_KEY.get(cueKey);
+    if (staticSpec) {
+      const customBuf = await this.tryFetchStaticClip(staticSpec.file);
+      if (token !== this.activeVoiceToken || !this.ensurePlayable()) return;
+      if (customBuf) {
+        this.playBufferThroughRadio(customBuf, token);
+        return;
+      }
+    }
+
+    if (this.ttsUnavailable) {
+      this.speakBrowserFallback(token, speaker, text, tone);
+      return;
+    }
     const buffer = await this.getDecodedVoiceBuffer(cueKey, speaker, text, tone);
     if (token !== this.activeVoiceToken || !this.ensurePlayable() || !this.ctx || !this.radioInput) {
       return;
@@ -479,27 +641,7 @@ export class SoundEngine {
       return;
     }
 
-    const now = this.ctx.currentTime;
-    const src = this.ctx.createBufferSource();
-    src.buffer = buffer;
-    src.connect(this.radioInput);
-    this.activeVoiceSrc = src;
-
-    this.radioHissGain?.gain.setTargetAtTime(0.028, now, 0.02);
-
-    src.onended = () => {
-      if (this.activeVoiceSrc === src) {
-        this.activeVoiceSrc = null;
-      }
-      if (this.ctx && this.radioHissGain) {
-        this.radioHissGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.03);
-      }
-      if (token === this.activeVoiceToken) {
-        this.playNoiseBurst(0.055, 'bandpass', 2100, 0.09);
-      }
-    };
-
-    src.start(now + 0.08);
+    this.playBufferThroughRadio(buffer, token);
   }
 
   private ensurePlayable(): boolean {
@@ -648,6 +790,7 @@ export class SoundEngine {
     if (chapterId !== this.lastChapter) {
       this.lastChapter = chapterId;
       this.lastCountdownBeep = -1;
+      this.lastCountdownSpoken = -1;
       this.lastWalkTick = -1;
       this.lastTransitTick = -1;
       this.lastConsoleTick = -1;
@@ -680,7 +823,9 @@ export class SoundEngine {
     if (subtitleKey && subtitleKey !== this.lastSubtitleKey) {
       this.lastSubtitleKey = subtitleKey;
       this.playCommsChirp(subtitleTone);
-      if (subtitleText) {
+      const isCountdownSubtitle =
+        chapterId === 'launch' && subtitleText.startsWith('T-minus');
+      if (subtitleText && !isCountdownSubtitle) {
         void this.playRadioVoiceover(subtitleKey, subtitleSpeaker, subtitleText, subtitleTone);
       }
     } else if (!subtitleKey) {
@@ -725,14 +870,18 @@ export class SoundEngine {
       }
     }
 
-    // Chapter 3 launch: countdown klaxons + massive ignition + booster separation clang
+    // Chapter 3 launch: synced manly radio countdown ("T-minus five.. four.. three.. two.. one") + klaxons + ignition
     if (chapterId === 'launch') {
-      if (!ignited && countdownNumber >= 1 && countdownNumber <= 5) {
+      if (!ignited && localTime >= 1.5 && countdownNumber >= 1 && countdownNumber <= 5) {
         if (countdownNumber !== this.lastCountdownBeep) {
           this.lastCountdownBeep = countdownNumber;
           const freq = countdownNumber === 1 ? 1046.5 : 698.46;
           this.playTone(freq, 0.22, 'triangle', 0.28);
           this.playTone(freq * 0.5, 0.22, 'sine', 0.2);
+        }
+        if (countdownNumber !== this.lastCountdownSpoken) {
+          this.lastCountdownSpoken = countdownNumber;
+          this.playCountdownRadioWord(countdownNumber);
         }
       }
       if (ignited) {
